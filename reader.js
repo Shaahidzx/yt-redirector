@@ -320,7 +320,16 @@ function wirePanel() {
   $scrub.oninput = () => { $scrubpct.textContent = $scrub.value + '%'; };
   $scrub.onchange = () => book && jumpTo(percentToOffset(book.text, +$scrub.value, book.startOffset || 0));
   $('bmAdd').onclick = addBookmark;
-  $('getproR').href = cfg.proUrl;
+  if (pro) {
+    const g = $('getproR');
+    g.textContent = '✓ Pro active';
+    g.removeAttribute('href');
+    g.style.cssText = 'background:transparent;color:inherit;opacity:.7;padding:0';
+    // drop the ★ "locked" markers now that everything's unlocked
+    document.querySelectorAll('#panel [data-pro]').forEach(b => { b.textContent = b.textContent.replace(/\s*★/, ''); });
+  } else {
+    $('getproR').href = cfg.proUrl;
+  }
 }
 
 function exportHighlights() {

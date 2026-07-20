@@ -21,12 +21,16 @@ const $proStatus = document.getElementById('proStatus');
 async function isPro() { return (await chrome.storage.local.get('pro')).pro === true; }
 
 async function refreshProUI() {
-  if (await isPro()) {
+  const p = await isPro();
+  document.getElementById('getpro').hidden = p;   // top-right "★ Get Pro"
+  document.getElementById('getpro2').hidden = p;  // "Get Pro →" in the Pro section
+  if (p) {
     $proStatus.textContent = '✓ Pro active';
     $proStatus.className = 'ok';
     $license.hidden = true; $activate.hidden = true; $deactivate.hidden = false;
   } else {
     $proStatus.className = ''; $deactivate.hidden = true;
+    $license.hidden = false; $activate.hidden = false;
   }
 }
 
