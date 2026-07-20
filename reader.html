@@ -1,0 +1,189 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Read</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #faf8f3; --fg: #2b2b2b; --accent: #c0392b;
+      --fs: 19px; --lh: 1.7; --w: 660px;
+      --ff: Georgia, "Times New Roman", serif;
+    }
+    @media (prefers-color-scheme: dark) { :root { --bg: #14140f; --fg: #d8d4c7; } }
+    /* Explicit theme choices override the system default. */
+    :root[data-theme="light"] { --bg: #faf8f3; --fg: #2b2b2b; }
+    :root[data-theme="dark"]  { --bg: #14140f; --fg: #d8d4c7; }
+    :root[data-theme="sepia"] { --bg: #f4ecd8; --fg: #5b4636; }
+    :root[data-theme="nord"]  { --bg: #2e3440; --fg: #d8dee9; --accent: #88c0d0; }
+    :root[data-theme="solarized"] { --bg: #fdf6e3; --fg: #586e75; --accent: #b58900; }
+    :root[data-font="sans"] { --ff: system-ui, -apple-system, sans-serif; }
+    body {
+      margin: 0; padding: 8vh 0 12vh;
+      font: var(--fs)/var(--lh) var(--ff);
+      background: var(--bg); color: var(--fg);
+    }
+    main { max-width: var(--w); margin: 0 auto; padding: 0 24px; }
+    #text { white-space: pre-wrap; }
+    #more, #earlier {
+      display: block; margin: 28px auto; padding: 8px 18px;
+      font: inherit; font-size: 15px; background: none;
+      border: 1px solid currentColor; border-radius: 6px;
+      color: inherit; opacity: .55; cursor: pointer;
+    }
+    #more:hover, #earlier:hover { opacity: .9; }
+    #empty { opacity: .7; font-size: 16px; }
+    #empty a { color: inherit; }
+    /* Deliberately plain and quiet — nothing that screams "blocked" over your shoulder. */
+    footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center;
+      padding: 14px; background: linear-gradient(transparent, var(--bg) 40%); }
+    /* Hover-revealed top bar: progress + book switcher. Hidden so it never nags. */
+    #bar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 5;
+      opacity: 0; transition: opacity .18s; pointer-events: none;
+    }
+    #bar:hover, #hot:hover + #bar { opacity: 1; pointer-events: auto; }
+    /* #hot sits BELOW the bar (z-index 4 < 5): when the bar is hidden it has
+       pointer-events:none, so a hover at the top edge passes through to #hot and
+       reveals the bar; once revealed the bar is on top and its buttons are clickable. */
+    #hot { position: fixed; top: 0; left: 0; right: 0; height: 14px; z-index: 4; }
+    #progress { height: 3px; background: var(--accent); width: 0; transition: width .2s; }
+    #barrow { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+      font: 13px system-ui, sans-serif; background: #00000018; backdrop-filter: blur(3px); }
+    #streak { opacity: .85; white-space: nowrap; }
+    #books { display: flex; gap: 4px; }
+    /* Always-available back-to-top, appears once scrolled down. */
+    #totop { position: fixed; right: 18px; bottom: 74px; z-index: 8;
+      width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
+      font: 18px system-ui, sans-serif; background: var(--accent); color: #fff;
+      box-shadow: 0 3px 10px #0006; }
+    #totop[hidden] { display: none; }
+    /* Reader menu + slide-in panel */
+    #menu { position: fixed; left: 18px; top: 14px; z-index: 8;
+      width: 36px; height: 36px; border-radius: 8px; border: none; cursor: pointer;
+      font: 17px system-ui, sans-serif; background: #8883; color: var(--fg); }
+    #panel { position: fixed; top: 0; right: 0; bottom: 0; width: 300px; max-width: 82vw;
+      z-index: 9; background: var(--bg); color: var(--fg); box-shadow: -4px 0 22px #0006;
+      transform: translateX(100%); transition: transform .2s; overflow-y: auto;
+      padding: 16px 18px; font: 14px system-ui, sans-serif; }
+    #panel.open { transform: translateX(0); }
+    #panel h4 { margin: 20px 0 6px; font-size: 11px; text-transform: uppercase;
+      letter-spacing: .06em; opacity: .55; }
+    #panel .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    #panel button { font: inherit; padding: 5px 10px; border: 1px solid #8886;
+      border-radius: 6px; background: none; color: inherit; cursor: pointer; }
+    #panel button.on { background: var(--accent); color: #fff; border-color: transparent; }
+    #getproR { display: inline-block; padding: 6px 12px; border-radius: 6px;
+      background: var(--accent); color: #fff; text-decoration: none; font: inherit; }
+    #panel section[hidden] { display: none; }
+    #scrub { width: 100%; accent-color: var(--accent); }
+    #scrubpct { opacity: .6; font-size: 12px; }
+    #chapters button, #bmarks .bm { display: flex; width: 100%; margin: 3px 0; text-align: left; }
+    #chapters button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #bmarks .bm { gap: 6px; align-items: center; }
+    #bmarks .bm span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      cursor: pointer; padding: 4px 0; }
+    #bmarks .bm button { padding: 2px 8px; }
+    #phead { display: flex; justify-content: space-between; align-items: center; }
+    #books button {
+      font: inherit; padding: 3px 9px; border: none; border-radius: 5px;
+      background: #8882; color: inherit; cursor: pointer; opacity: .8;
+      max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #books button.on { background: #c0392b33; opacity: 1; }
+    /* Highlights */
+    mark { color: inherit; border-radius: 2px; padding: 0 1px; }
+    mark.hl-yellow { background: rgba(255,214,0,.38); }
+    mark.hl-green  { background: rgba(60,205,130,.34); }
+    mark.hl-pink   { background: rgba(255,105,155,.34); }
+    mark.hl-blue   { background: rgba(90,160,255,.34); }
+    mark.hl-underline { background: none; text-decoration: underline wavy currentColor; }
+    /* Selection toolbar */
+    #hltools { position: absolute; display: none; gap: 6px; z-index: 8;
+      padding: 6px 8px; border-radius: 8px; background: #222; box-shadow: 0 4px 14px #0007; }
+    #hltools .sw { width: 18px; height: 18px; border-radius: 50%; border: 1px solid #fff3;
+      cursor: pointer; padding: 0; }
+    #hltools .sw.hl-underline { background: #444; color: #fff; font: 12px system-ui;
+      display: grid; place-items: center; }
+    #hltools .erase { background: #444; color: #fff; border: none; border-radius: 5px;
+      cursor: pointer; font: 12px system-ui; padding: 0 6px; }
+    #go {
+      font: 14px system-ui, sans-serif; padding: 7px 16px;
+      border: none; border-radius: 6px; background: #8a8a8a33; color: inherit;
+      cursor: not-allowed; opacity: .6;
+    }
+    #go.ready { cursor: pointer; opacity: 1; background: #c0392b22; }
+  </style>
+</head>
+<body>
+  <div id="hot"></div>
+  <div id="bar">
+    <div id="progress"></div>
+    <div id="barrow">
+      <span id="streak"></span>
+      <span style="flex:1"></span>
+      <div id="books"></div>
+    </div>
+  </div>
+  <button id="totop" hidden title="Back to top">↑</button>
+  <button id="menu" title="Reader menu">☰</button>
+  <aside id="panel">
+    <div id="phead"><strong>Reader</strong><button id="pclose">✕</button></div>
+    <section>
+      <h4>Jump to</h4>
+      <input id="scrub" type="range" min="0" max="100" value="0">
+      <div id="scrubpct">0%</div>
+    </section>
+    <section id="tocSec" hidden>
+      <h4>Contents</h4>
+      <div id="chapters"></div>
+    </section>
+    <section>
+      <h4>Bookmarks</h4>
+      <button id="bmAdd">＋ Bookmark this spot</button>
+      <div id="bmarks"></div>
+    </section>
+    <section>
+      <h4>Text</h4>
+      <div class="row">
+        <button id="fsDown">A−</button><button id="fsUp">A+</button>
+        <button id="lhDown">Spacing −</button><button id="lhUp">Spacing +</button>
+        <button id="wDown">Width −</button><button id="wUp">Width +</button>
+      </div>
+    </section>
+    <section>
+      <h4>Theme</h4>
+      <div class="row" id="themes">
+        <button data-theme="system">System</button>
+        <button data-theme="light">Light</button>
+        <button data-theme="dark">Dark</button>
+        <button data-theme="sepia">Sepia</button>
+        <button data-theme="nord" data-pro>Nord ★</button>
+        <button data-theme="solarized" data-pro>Solarized ★</button>
+      </div>
+    </section>
+    <section>
+      <h4>Font</h4>
+      <div class="row" id="fonts">
+        <button data-font="serif">Serif</button>
+        <button data-font="sans" data-pro>Sans ★</button>
+      </div>
+    </section>
+    <section>
+      <h4>Pro</h4>
+      <button id="export" data-pro>⬇ Export highlights ★</button>
+      <div style="margin-top:8px"><a id="getproR" target="_blank" rel="noopener">★ Get Pro</a></div>
+    </section>
+  </aside>
+  <div id="hltools"></div>
+  <main>
+    <button id="earlier" hidden>↑ Read earlier</button>
+    <div id="text"></div>
+    <button id="more" hidden>Read on ↓</button>
+    <p id="empty" hidden>No book loaded. Open the extension's <a id="opts" href="#">options</a> to add one.</p>
+  </main>
+  <footer><button id="go" disabled>Continue to YouTube</button></footer>
+  <script src="config.js"></script>
+  <script type="module" src="reader.js"></script>
+</body>
+</html>

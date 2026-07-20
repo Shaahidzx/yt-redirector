@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>yt-redirector — library</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 20px; }
+    .book { border: 1px solid #8883; border-radius: 8px; padding: 12px 14px; margin: 10px 0; }
+    .book.active { border-color: #c0392b; }
+    .book h3 { margin: 0 0 6px; font-size: 15px; }
+    .book small { opacity: .6; }
+    button { font: inherit; padding: 5px 10px; border: 1px solid #8886; border-radius: 6px;
+      background: none; color: inherit; cursor: pointer; margin-right: 6px; }
+    #drop { border: 2px dashed #8886; border-radius: 10px; padding: 26px; text-align: center; opacity: .8; }
+    #status { min-height: 1.4em; opacity: .8; }
+    #topbar { display: flex; justify-content: space-between; align-items: center; }
+    #getpro { padding: 6px 12px; border-radius: 6px; background: #c0392b; color: #fff;
+      text-decoration: none; font-size: 14px; }
+    #pro { border-top: 1px solid #8883; margin-top: 28px; padding-top: 16px; }
+    #pro h2 { font-size: 15px; }
+    #pro input { font: inherit; padding: 6px 8px; width: 60%; }
+    #proStatus { margin-left: 6px; opacity: .85; }
+    #proStatus.ok { color: #2e9e5b; opacity: 1; }
+    #proStatus.err { color: #c0392b; opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <h1>Your reading library</h1>
+    <a id="getpro" target="_blank" rel="noopener">★ Get Pro</a>
+  </div>
+  <p>The active book is what you read while YouTube is delayed.</p>
+
+  <div id="drop">
+    Drop a <b>.pdf</b>, <b>.epub</b>, or <b>.txt</b> here, or
+    <input type="file" id="file" accept=".pdf,.epub,.txt,text/plain,application/pdf,application/epub+zip">
+  </div>
+  <p id="status"></p>
+
+  <div id="list"></div>
+
+  <section id="pro">
+    <h2>Pro</h2>
+    <p>Unlimited books, extra themes &amp; fonts, and highlight export.
+      <a id="getpro2" target="_blank" rel="noopener">Get Pro →</a></p>
+    <div>
+      <input id="license" type="text" placeholder="Paste your license key">
+      <button id="activate">Activate</button>
+      <button id="deactivate" hidden>Remove</button>
+      <span id="proStatus"></span>
+    </div>
+  </section>
+
+  <script src="config.js"></script>
+  <script type="module" src="library.js"></script>
+</body>
+</html>
