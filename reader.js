@@ -1,7 +1,8 @@
+import { CONFIG } from './config.js';
 import { delaySeconds, sentenceEnd, paragraphEnd, prevParagraphStart, paragraphStartAt,
-  percentToOffset, offsetToPercent, bookmarkLabel, highlightsMarkdown, buildSegments, updateStreak, dayKey } from './logic.js';
+  percentToOffset, offsetToPercent, bookmarkLabel, highlightsMarkdown, searchBook, buildSegments, updateStreak, dayKey } from './logic.js';
 
-const cfg = self.CONFIG;
+const cfg = CONFIG;
 const $ = (id) => document.getElementById(id);
 const $text = $('text');
 const $more = $('more');
@@ -18,7 +19,20 @@ const $scrub = $('scrub');
 const $scrubpct = $('scrubpct');
 const $chapters = $('chapters');
 const $bmarks = $('bmarks');
-const onDemand = new URLSearchParams(location.search).has('ondemand');
+const $search = $('search');
+const $searchResults = $('searchResults');
+const $noteEditor = $('noteEditor');
+const $noteText = $('noteText');
+const params = new URLSearchParams(location.search);
+const onDemand = params.has('ondemand');
+// The blocked site we intercepted, so Continue can send you back to that exact page.
+const target = safeTarget(params.get('to'));
+function safeTarget(raw) {
+  try {
+    const u = new URL(raw);
+    return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : null;
+  } catch { return null; }
+}
 
 document.getElementById('opts').onclick = (e) => {
   e.preventDefault();
@@ -32,10 +46,11 @@ addEventListener('scroll', () => { $totop.hidden = window.scrollY < 300; });
 init();
 
 async function init() {
-  const { installDate, books, activeId, streak, settings: saved, pro: isProSaved } = await chrome.storage.local.get(
-    ['installDate', 'books', 'activeId', 'streak', 'settings', 'pro']
+  const { installDate, books, activeId, streak, settings: saved, pro: isProSaved, delay } = await chrome.storage.local.get(
+    ['installDate', 'books', 'activeId', 'streak', 'settings', 'pro', 'delay']
   );
   pro = isProSaved === true;
+  delayCfg = { ...cfg.delay, ...(delay || {}) }; // user's curve overrides the defaults
   settings = { ...cfg.readerDefaults, ...(saved || {}) };
   applySettings();               // set fonts/theme before first paint
   wirePanel();
@@ -70,15 +85,16 @@ function showStreak(streak) {
 
 // --- growing delay ---------------------------------------------------------
 function startCountdown(installDate) {
-  let remaining = delaySeconds(cfg, installDate);
+  const site = target ? new URL(target).hostname.replace(/^www\./, '') : 'YouTube';
+  let remaining = delaySeconds(delayCfg, installDate);
   const tick = () => {
     if (remaining <= 0.001) {
       $go.disabled = false;
       $go.classList.add('ready');
-      $go.textContent = 'Continue to YouTube';
+      $go.textContent = `Continue to ${site}`;
       return;
     }
-    $go.textContent = `Continue to YouTube (${remaining.toFixed(1)}s)`;
+    $go.textContent = `Continue to ${site} (${remaining.toFixed(1)}s)`;
     remaining = Math.round((remaining - 0.1) * 10) / 10;
     setTimeout(tick, 100);
   };
@@ -89,13 +105,13 @@ $go.onclick = async () => {
   if ($go.disabled) return;
   $go.disabled = true;
   await chrome.runtime.sendMessage({ type: 'continue' });
-  location.href = 'https://www.youtube.com/';
+  location.href = target || 'https://www.youtube.com/';
 };
 
 // --- flowing reader --------------------------------------------------------
 // PAGER: base..pos bound ONE page (they move together — no accumulation). `readPos`
 // persists the current page start (`base`). `baited` = showing just the opening sentence.
-let book, base, pos, baited, settings, pro = false, streakMarked = false;
+let book, base, pos, baited, settings, delayCfg, pro = false, streakMarked = false;
 
 // Show a single page starting at `start`. Snaps to the paragraph; clamps into range and, if
 // at/after the end, backs up to the last paragraph. bait=true shows just the first sentence.
@@ -170,6 +186,14 @@ function renderShown() {
     if (!seg.variant) { frag.append(t); continue; }
     const mark = document.createElement('mark');
     mark.className = 'hl-' + seg.variant;
+    // tag with its source highlight (last one covering the segment) so notes can attach
+    const mid = (seg.start + seg.end) / 2;
+    let hi = -1;
+    book.highlights.forEach((h, idx) => { if (h.start <= mid && mid < h.end) hi = idx; });
+    if (hi >= 0) {
+      mark.dataset.hl = hi;
+      if (book.highlights[hi].note) mark.title = book.highlights[hi].note;
+    }
     mark.append(t);
     frag.append(mark);
   }
@@ -277,13 +301,25 @@ function applySettings() {
   r.style.setProperty('--fs', settings.fontSize + 'px');
   r.style.setProperty('--lh', settings.lineHeight);
   r.style.setProperty('--w', settings.width + 'px');
+  r.style.setProperty('--ls', (settings.letterSpacing || 0) + 'px');
   if (settings.theme && settings.theme !== 'system') r.dataset.theme = settings.theme;
   else delete r.dataset.theme;
-  if (settings.font === 'sans') r.dataset.font = 'sans'; else delete r.dataset.font;
+  // Custom theme has no CSS rule — drive the vars inline, and clear them for other themes
+  // (inline styles would otherwise override the [data-theme] rules).
+  if (settings.theme === 'custom') {
+    r.style.setProperty('--bg', settings.customBg);
+    r.style.setProperty('--fg', settings.customFg);
+  } else {
+    r.style.removeProperty('--bg');
+    r.style.removeProperty('--fg');
+  }
+  if (settings.font && settings.font !== 'serif') r.dataset.font = settings.font; else delete r.dataset.font;
   document.querySelectorAll('#themes button').forEach(b =>
     b.classList.toggle('on', (settings.theme || 'system') === b.dataset.theme));
   document.querySelectorAll('#fonts button').forEach(b =>
     b.classList.toggle('on', (settings.font || 'serif') === b.dataset.font));
+  if ($('customBg')) $('customBg').value = settings.customBg;
+  if ($('customFg')) $('customFg').value = settings.customFg;
 }
 const saveSettings = () => chrome.storage.local.set({ settings });
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -304,6 +340,18 @@ function wirePanel() {
   $('lhDown').onclick = bump('lineHeight', -0.1, 1.2, 2.4, r1);
   $('wUp').onclick = bump('width', 40, 420, 900);
   $('wDown').onclick = bump('width', -40, 420, 900);
+  // Letter spacing (Pro)
+  $('lsUp').onclick = () => { if (!requirePro()) return; settings.letterSpacing = r1(clamp((settings.letterSpacing || 0) + 0.5, 0, 4)); applySettings(); saveSettings(); };
+  $('lsDown').onclick = () => { if (!requirePro()) return; settings.letterSpacing = r1(clamp((settings.letterSpacing || 0) - 0.5, 0, 4)); applySettings(); saveSettings(); };
+  // Custom colors (Pro) — block the picker for non-Pro, else live-apply as the "custom" theme
+  for (const id of ['customBg', 'customFg']) {
+    const el = $(id);
+    el.addEventListener('click', (e) => { if (!pro) { e.preventDefault(); requirePro(); el.blur(); } });
+    el.oninput = () => { if (!pro) return; settings[id] = el.value; settings.theme = 'custom'; applySettings(); saveSettings(); };
+  }
+  // Search (Pro)
+  $search.addEventListener('focus', () => { if (!pro) { requirePro(); $search.blur(); } });
+  $search.oninput = () => { if (pro) renderSearch($search.value); };
   document.querySelectorAll('#themes button').forEach(b => {
     b.onclick = () => {
       if (b.hasAttribute('data-pro') && !requirePro()) return;
@@ -327,6 +375,8 @@ function wirePanel() {
     g.style.cssText = 'background:transparent;color:inherit;opacity:.7;padding:0';
     // drop the ★ "locked" markers now that everything's unlocked
     document.querySelectorAll('#panel [data-pro]').forEach(b => { b.textContent = b.textContent.replace(/\s*★/, ''); });
+    document.querySelectorAll('#panel .lbl').forEach(s => { s.textContent = s.textContent.replace(/\s*★/, ''); });
+    $search.placeholder = $search.placeholder.replace(/\s*★/, '');
   } else {
     $('getproR').href = cfg.proUrl;
   }
@@ -402,3 +452,60 @@ function renderBookmarks() {
     $bmarks.append(row);
   }
 }
+
+// --- search in book (Pro) --------------------------------------------------
+function renderSearch(query) {
+  $searchResults.replaceChildren();
+  if (!book || query.trim().length < 2) return;
+  const hits = searchBook(book.text, query, 20);
+  if (!hits.length) {
+    const none = document.createElement('div');
+    none.className = 'lbl';
+    none.textContent = 'No matches.';
+    $searchResults.append(none);
+    return;
+  }
+  for (const hit of hits) {
+    const b = document.createElement('button');
+    b.className = 'hit';
+    b.textContent = hit.snippet;
+    b.title = hit.snippet;
+    b.onclick = () => jumpTo(hit.offset);
+    $searchResults.append(b);
+  }
+}
+
+// --- notes on highlights (Pro) ---------------------------------------------
+let noteIdx = null;
+
+$text.addEventListener('click', (e) => {
+  const m = e.target.closest?.('mark[data-hl]');
+  if (!m) return;
+  if (!requirePro()) return;
+  openNoteEditor(+m.dataset.hl, m);
+});
+
+function openNoteEditor(idx, el) {
+  noteIdx = idx;
+  $noteText.value = book.highlights[idx]?.note || '';
+  const box = el.getBoundingClientRect();
+  $noteEditor.style.display = 'block';
+  $noteEditor.style.left = Math.min(window.scrollX + box.left, window.innerWidth - 260) + 'px';
+  $noteEditor.style.top = (window.scrollY + box.bottom + 6) + 'px';
+  $noteText.focus();
+}
+
+function closeNote() { $noteEditor.style.display = 'none'; noteIdx = null; }
+
+$('noteSave').onclick = () => {
+  if (noteIdx === null) return;
+  const v = $noteText.value.trim();
+  if (v) book.highlights[noteIdx].note = v; else delete book.highlights[noteIdx].note;
+  persistBook(); renderShown(); closeNote();
+};
+$('noteDel').onclick = () => {
+  if (noteIdx === null) return;
+  delete book.highlights[noteIdx].note;
+  persistBook(); renderShown(); closeNote();
+};
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNote(); });

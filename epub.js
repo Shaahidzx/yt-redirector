@@ -43,7 +43,28 @@ export async function extractEpub(buf) {
     offset += t.length + 2; // account for the '\n\n' joiner between parts
   }
   if (!parts.length) throw new Error('no readable text in epub');
-  return { text: parts.join('\n\n'), chapters };
+
+  // Cover art: EPUB3 marks it with properties="cover-image"; EPUB2 uses <meta name="cover">.
+  let cover = null;
+  const ref = findCover(opf);
+  if (ref) {
+    const p = normalize(opfDir + decodeURIComponent(ref.href.split('#')[0]));
+    if (files[p]) cover = new Blob([await inflate(files[p])], { type: ref.type || 'image/jpeg' });
+  }
+  return { text: parts.join('\n\n'), chapters, cover };
+}
+
+function findCover(opf) {
+  const items = [...opf.getElementsByTagNameNS('*', 'item')];
+  const byProps = items.find(it => (it.getAttribute('properties') || '').includes('cover-image'));
+  if (byProps) return { href: byProps.getAttribute('href'), type: byProps.getAttribute('media-type') };
+  const meta = [...opf.getElementsByTagNameNS('*', 'meta')]
+    .find(m => (m.getAttribute('name') || '').toLowerCase() === 'cover');
+  if (meta) {
+    const it = items.find(i => i.getAttribute('id') === meta.getAttribute('content'));
+    if (it) return { href: it.getAttribute('href'), type: it.getAttribute('media-type') };
+  }
+  return null;
 }
 
 function xml(s) {

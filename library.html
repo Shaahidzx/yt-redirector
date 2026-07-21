@@ -18,12 +18,44 @@
     #topbar { display: flex; justify-content: space-between; align-items: center; }
     #getpro { padding: 6px 12px; border-radius: 6px; background: #c0392b; color: #fff;
       text-decoration: none; font-size: 14px; }
+    /* Pro shelf: uniform cover grid */
+    #shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 20px 16px; margin-top: 14px; }
+    .card { text-align: left; }
+    .art { position: relative; aspect-ratio: 2/3; border-radius: 8px; overflow: hidden;
+      background: linear-gradient(145deg, #8a8a8a22, #8a8a8a11);
+      box-shadow: 0 3px 10px #0004; display: grid; place-items: center; cursor: pointer; }
+    .art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .art .ph { padding: 10px; font-size: 12px; line-height: 1.35; opacity: .65; text-align: center;
+      overflow: hidden; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; }
+    .card.active .art { outline: 2px solid #c0392b; outline-offset: 2px; }
+    .card h3 { margin: 8px 0 2px; font-size: 13px; font-weight: 600; line-height: 1.3;
+      overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .card small { opacity: .6; font-size: 11px; }
+    .card .acts { margin-top: 6px; display: flex; gap: 4px; }
+    .card .acts button { font-size: 11px; padding: 3px 7px; margin: 0; }
     #pro { border-top: 1px solid #8883; margin-top: 28px; padding-top: 16px; }
     #pro h2 { font-size: 15px; }
     #pro input { font: inherit; padding: 6px 8px; width: 60%; }
     #proStatus { margin-left: 6px; opacity: .85; }
     #proStatus.ok { color: #2e9e5b; opacity: 1; }
     #proStatus.err { color: #c0392b; opacity: 1; }
+    /* Tabs keep every feature one click away instead of one long scroll. */
+    #tabs { display: flex; gap: 4px; border-bottom: 1px solid #8883; margin: 18px 0 0; }
+    #tabs button { border: none; border-radius: 6px 6px 0 0; margin: 0; padding: 8px 14px;
+      opacity: .6; }
+    #tabs button.on { opacity: 1; background: #8882; font-weight: 600; }
+    section[data-panel] { padding-top: 16px; }
+    .hint { opacity: .7; font-size: 13px; line-height: 1.5; }
+    .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .row input[type=text] { font: inherit; padding: 6px 8px; flex: 1; min-width: 180px; }
+    .site { display: flex; align-items: center; gap: 8px; padding: 7px 10px; margin: 6px 0;
+      border: 1px solid #8883; border-radius: 7px; }
+    .site span { flex: 1; }
+    .site button { margin: 0; padding: 3px 9px; font-size: 12px; }
+    .row label { display: flex; align-items: center; gap: 5px; font-size: 13px; opacity: .85; }
+    .row input[type=number] { font: inherit; width: 72px; padding: 5px 6px; }
+    section h2 { font-size: 15px; margin: 26px 0 4px; }
   </style>
 </head>
 <body>
@@ -31,29 +63,69 @@
     <h1>Your reading library</h1>
     <a id="getpro" target="_blank" rel="noopener">★ Get Pro</a>
   </div>
-  <p>The active book is what you read while YouTube is delayed.</p>
+  <nav id="tabs">
+    <button data-tab="library" class="on">Library</button>
+    <button data-tab="focus">Focus</button>
+    <button data-tab="data">Data</button>
+    <button data-tab="pro">Pro</button>
+  </nav>
 
-  <div id="drop">
-    Drop a <b>.pdf</b>, <b>.epub</b>, or <b>.txt</b> here, or
-    <input type="file" id="file" accept=".pdf,.epub,.txt,text/plain,application/pdf,application/epub+zip">
-  </div>
-  <p id="status"></p>
+  <section data-panel="library">
+    <p class="hint">The active book is what you read while a blocked site is delayed.</p>
+    <div id="drop">
+      Drop a <b>.pdf</b>, <b>.epub</b>, or <b>.txt</b> here, or
+      <input type="file" id="file" accept=".pdf,.epub,.txt,text/plain,application/pdf,application/epub+zip">
+    </div>
+    <p id="status"></p>
+    <div id="shelf" hidden></div>
+    <div id="list"></div>
+  </section>
 
-  <div id="list"></div>
+  <section data-panel="focus" hidden>
+    <p class="hint">YouTube is always delayed. <b>Pro</b> lets you add any other site —
+      they all redirect to your book instead. ★</p>
+    <div class="row">
+      <input id="siteInput" type="text" placeholder="instagram.com">
+      <button id="siteAdd">Add site</button>
+    </div>
+    <p id="siteStatus" class="hint"></p>
+    <div id="siteList"></div>
 
-  <section id="pro">
-    <h2>Pro</h2>
-    <p>Unlimited books, extra themes &amp; fonts, and highlight export.
+    <h2>Delay curve ★</h2>
+    <p class="hint">The wait grows a little every day — the same small percentage each time, so
+      you never notice a jump. <b>Pro</b> can tune it.</p>
+    <div class="row">
+      <label>Start <input id="dStart" type="number" min="0.5" step="0.5"> s</label>
+      <label>Reach <input id="dTarget" type="number" min="1" step="1"> min</label>
+      <label>Over <input id="dDays" type="number" min="1" step="1"> days</label>
+      <button id="dSave">Save</button>
+      <button id="dReset">Reset</button>
+    </div>
+    <p id="dPreview" class="hint"></p>
+  </section>
+
+  <section data-panel="data" hidden>
+    <p class="hint">Everything lives only in this browser. Back it up before reinstalling —
+      there is no cloud copy.</p>
+    <div class="row">
+      <button id="exportAll">⬇ Export backup</button>
+      <button id="importBtn">⬆ Restore backup</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </div>
+    <p id="dataStatus" class="hint"></p>
+  </section>
+
+  <section data-panel="pro" hidden>
+    <p class="hint">Unlimited books, block any site, extra themes &amp; fonts, search, notes,
+      highlight export, and the cover shelf.
       <a id="getpro2" target="_blank" rel="noopener">Get Pro →</a></p>
-    <div>
+    <div class="row">
       <input id="license" type="text" placeholder="Paste your license key">
       <button id="activate">Activate</button>
       <button id="deactivate" hidden>Remove</button>
       <span id="proStatus"></span>
     </div>
   </section>
-
-  <script src="config.js"></script>
   <script type="module" src="library.js"></script>
 </body>
 </html>

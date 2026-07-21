@@ -1,12 +1,31 @@
-importScripts('config.js');
+import { CONFIG } from './config.js';
+import { buildRedirectRules } from './logic.js';
 
 // Record install date once (drives the growing delay) and clear any stale bypass rules.
 chrome.runtime.onInstalled.addListener(async () => {
   const { installDate } = await chrome.storage.local.get('installDate');
   if (!installDate) await chrome.storage.local.set({ installDate: Date.now() });
   clearAllPasses();
+  syncBlockRules();
 });
-chrome.runtime.onStartup.addListener(clearAllPasses);
+chrome.runtime.onStartup.addListener(() => { clearAllPasses(); syncBlockRules(); });
+
+// Keep the redirect rules in step with the user's blocked-site list.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.blocked) syncBlockRules();
+});
+
+// YouTube is always blocked; Pro users add their own sites on top.
+async function syncBlockRules() {
+  const { blocked = [] } = await chrome.storage.local.get('blocked');
+  const domains = ['youtube.com', ...blocked.filter(d => d !== 'youtube.com')];
+  const rules = buildRedirectRules(domains, chrome.runtime.id);
+  const old = await chrome.declarativeNetRequest.getDynamicRules();
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: old.map(r => r.id),
+    addRules: rules,
+  });
+}
 
 // Toolbar button: open the reader on demand (no YouTube gate) so you can read
 // and keep your streak without a YouTube urge.
@@ -38,9 +57,10 @@ async function grantPass(tabId) {
     removeRuleIds: [tabId],
     addRules: [{
       id: tabId,
-      priority: 10, // beats the static redirect (priority 1)
+      priority: 10, // beats the redirect rules (priority 1)
+      // Tab-scoped and short-lived, so it covers whichever blocked site this tab was headed to.
       action: { type: 'allowAllRequests' },
-      condition: { resourceTypes: ['main_frame'], tabIds: [tabId], requestDomains: ['youtube.com'] }
+      condition: { resourceTypes: ['main_frame'], tabIds: [tabId] }
     }]
   });
   setTimeout(() => {

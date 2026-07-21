@@ -4,23 +4,28 @@
   <meta charset="utf-8">
   <title>Read</title>
   <style>
+    @font-face { font-family: 'OpenDyslexic'; font-display: swap;
+      src: url('fonts/OpenDyslexic-Regular.woff2') format('woff2'); }
     :root {
       color-scheme: light dark;
       --bg: #faf8f3; --fg: #2b2b2b; --accent: #c0392b;
-      --fs: 19px; --lh: 1.7; --w: 660px;
+      --fs: 19px; --lh: 1.7; --w: 660px; --ls: 0px;
       --ff: Georgia, "Times New Roman", serif;
     }
     @media (prefers-color-scheme: dark) { :root { --bg: #14140f; --fg: #d8d4c7; } }
-    /* Explicit theme choices override the system default. */
+    /* Explicit theme choices override the system default. (Custom colors are set inline.) */
     :root[data-theme="light"] { --bg: #faf8f3; --fg: #2b2b2b; }
     :root[data-theme="dark"]  { --bg: #14140f; --fg: #d8d4c7; }
     :root[data-theme="sepia"] { --bg: #f4ecd8; --fg: #5b4636; }
     :root[data-theme="nord"]  { --bg: #2e3440; --fg: #d8dee9; --accent: #88c0d0; }
     :root[data-theme="solarized"] { --bg: #fdf6e3; --fg: #586e75; --accent: #b58900; }
     :root[data-font="sans"] { --ff: system-ui, -apple-system, sans-serif; }
+    :root[data-font="mono"] { --ff: ui-monospace, "SF Mono", Menlo, monospace; }
+    :root[data-font="dyslexic"] { --ff: 'OpenDyslexic', sans-serif; }
     body {
       margin: 0; padding: 8vh 0 12vh;
       font: var(--fs)/var(--lh) var(--ff);
+      letter-spacing: var(--ls);
       background: var(--bg); color: var(--fg);
     }
     main { max-width: var(--w); margin: 0 auto; padding: 0 24px; }
@@ -75,6 +80,23 @@
     #panel button.on { background: var(--accent); color: #fff; border-color: transparent; }
     #getproR { display: inline-block; padding: 6px 12px; border-radius: 6px;
       background: var(--accent); color: #fff; text-decoration: none; font: inherit; }
+    #panel input[type="color"] { width: 34px; height: 26px; padding: 0; border: 1px solid #8886;
+      border-radius: 5px; background: none; cursor: pointer; }
+    #panel .lbl { opacity: .6; font-size: 12px; }
+    #search { width: 100%; }
+    #searchResults { margin-top: 6px; }
+    #searchResults .hit { display: block; width: 100%; text-align: left; margin: 3px 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    /* Inline note editor for highlights */
+    #noteEditor { position: absolute; display: none; z-index: 8; width: 240px;
+      padding: 8px; border-radius: 8px; background: #222; box-shadow: 0 4px 14px #0007; }
+    #noteEditor textarea { width: 100%; height: 60px; box-sizing: border-box; resize: vertical;
+      font: 13px system-ui; border: none; border-radius: 5px; padding: 6px; }
+    #noteEditor .row { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+    #noteEditor button { font: 12px system-ui; padding: 3px 10px; border: none; border-radius: 5px;
+      cursor: pointer; background: #444; color: #fff; }
+    #noteEditor button.save { background: var(--accent); }
+    mark[data-hl] { cursor: pointer; }
     #panel section[hidden] { display: none; }
     #scrub { width: 100%; accent-color: var(--accent); }
     #scrubpct { opacity: .6; font-size: 12px; }
@@ -134,6 +156,11 @@
       <input id="scrub" type="range" min="0" max="100" value="0">
       <div id="scrubpct">0%</div>
     </section>
+    <section>
+      <h4>Search</h4>
+      <input id="search" type="search" placeholder="Find in book ★">
+      <div id="searchResults"></div>
+    </section>
     <section id="tocSec" hidden>
       <h4>Contents</h4>
       <div id="chapters"></div>
@@ -149,6 +176,7 @@
         <button id="fsDown">A−</button><button id="fsUp">A+</button>
         <button id="lhDown">Spacing −</button><button id="lhUp">Spacing +</button>
         <button id="wDown">Width −</button><button id="wUp">Width +</button>
+        <button id="lsDown" data-pro>Letter −★</button><button id="lsUp" data-pro>Letter +★</button>
       </div>
     </section>
     <section>
@@ -160,6 +188,12 @@
         <button data-theme="sepia">Sepia</button>
         <button data-theme="nord" data-pro>Nord ★</button>
         <button data-theme="solarized" data-pro>Solarized ★</button>
+        <button data-theme="custom" data-pro>Custom ★</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <span class="lbl">Custom colors ★</span>
+        <input id="customBg" type="color" title="Background" data-pro>
+        <input id="customFg" type="color" title="Text" data-pro>
       </div>
     </section>
     <section>
@@ -167,6 +201,8 @@
       <div class="row" id="fonts">
         <button data-font="serif">Serif</button>
         <button data-font="sans" data-pro>Sans ★</button>
+        <button data-font="mono" data-pro>Mono ★</button>
+        <button data-font="dyslexic" data-pro>Dyslexic ★</button>
       </div>
     </section>
     <section>
@@ -176,6 +212,10 @@
     </section>
   </aside>
   <div id="hltools"></div>
+  <div id="noteEditor">
+    <textarea id="noteText" placeholder="Note on this highlight…"></textarea>
+    <div class="row"><button id="noteDel">Delete note</button><button id="noteSave" class="save">Save</button></div>
+  </div>
   <main>
     <button id="earlier" hidden>↑ Read earlier</button>
     <div id="text"></div>
@@ -183,7 +223,6 @@
     <p id="empty" hidden>No book loaded. Open the extension's <a id="opts" href="#">options</a> to add one.</p>
   </main>
   <footer><button id="go" disabled>Continue to YouTube</button></footer>
-  <script src="config.js"></script>
   <script type="module" src="reader.js"></script>
 </body>
 </html>

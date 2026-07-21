@@ -1,18 +1,28 @@
 // Run: node selfcheck.mjs   — asserts the delay ramp, reading units, and start-detector behave.
 import assert from 'node:assert';
-import { delaySeconds, sentenceEnd, paragraphEnd, prevParagraphStart, paragraphStartAt, percentToOffset, offsetToPercent, bookmarkLabel, highlightsMarkdown, detectStart, dayKey, prevKey, updateStreak, buildSegments } from './logic.js';
+import { delaySeconds, sentenceEnd, paragraphEnd, prevParagraphStart, paragraphStartAt, percentToOffset, offsetToPercent, bookmarkLabel, highlightsMarkdown, searchBook, normalizeDomain, buildRedirectRules, detectStart, dayKey, prevKey, updateStreak, buildSegments } from './logic.js';
 
-const cfg = { base: 1.0, step: 0.1, rampEveryDays: 3, cap: 60 };
+const cfg = { startSeconds: 1, targetSeconds: 300, targetDays: 100 };
 const DAY = 86400000;
 const t0 = 1_700_000_000_000;
+const delayAt = (d) => delaySeconds(cfg, t0, t0 + d * DAY);
 
-// Delay: flat for the first ramp window, then +step, monotonic, capped.
-assert.strictEqual(delaySeconds(cfg, t0, t0), 1.0);
-assert.strictEqual(delaySeconds(cfg, t0, t0 + 2 * DAY), 1.0);      // still day <3
-assert.ok(Math.abs(delaySeconds(cfg, t0, t0 + 3 * DAY) - 1.1) < 1e-9); // first bump
-assert.ok(Math.abs(delaySeconds(cfg, t0, t0 + 6 * DAY) - 1.2) < 1e-9);
-assert.strictEqual(delaySeconds(cfg, t0, t0 + 100000 * DAY), 60);  // capped
-assert.strictEqual(delaySeconds(cfg, undefined), 1.0);             // no install date yet
+// Delay curve: starts at `start`, reaches `target` on day N, then stays there.
+assert.strictEqual(delayAt(0), 1);
+assert.strictEqual(delayAt(100), 300);
+assert.strictEqual(delayAt(250), 300);                       // clamped past the target day
+assert.strictEqual(delaySeconds(cfg, undefined), 1);    // no install date yet
+
+// Strictly increasing, and never a jarring jump: the day-to-day RATIO is constant,
+// so day 1→2 feels exactly like day 50→51. That's the whole point of the curve.
+for (let d = 0; d < 100; d++) assert.ok(delayAt(d + 1) >= delayAt(d), `not increasing at day ${d}`);
+const early = delayAt(21) / delayAt(20), late = delayAt(71) / delayAt(70);
+assert.ok(Math.abs(early - late) < 0.01, `ratio drifted: ${early} vs ${late}`);
+assert.ok(early > 1.05 && early < 1.07, `expected ~+5.9%/day, got ${early}`);
+
+// Degenerate configs fall back to the target instead of exploding.
+assert.strictEqual(delaySeconds({ startSeconds: 5, targetSeconds: 5, targetDays: 10 }, t0, t0), 5);
+assert.strictEqual(delaySeconds({ startSeconds: 1, targetSeconds: 60, targetDays: 0 }, t0, t0), 60);
 
 // Reading units. Paragraphs are newline-separated in our extracted text.
 const p1 = 'First para. It has two sentences.';
@@ -60,6 +70,33 @@ const exBook = { name: 'B', text: 'Alpha beta. Gamma delta.', highlights: [{ sta
 const md = highlightsMarkdown(exBook);
 assert.ok(md.includes('# B') && md.includes('- Alpha beta _(yellow)_') && md.includes('## Bookmarks'));
 assert.ok(highlightsMarkdown({ name: 'E', text: '', highlights: [], bookmarks: [] }).includes('No highlights'));
+// notes ride along with their highlight in the export.
+assert.ok(highlightsMarkdown({ name: 'N', text: 'Alpha beta.', highlights: [{ start: 0, end: 10, variant: 'blue', note: 'key idea' }], bookmarks: [] }).includes('note: key idea'));
+
+// searchBook: finds every occurrence with a snippet + offset; empty query → nothing.
+const sb = 'The cat sat. Later the cat ran. No feline here.';
+const hits = searchBook(sb, 'cat');
+assert.strictEqual(hits.length, 2);
+assert.strictEqual(hits[0].offset, sb.indexOf('cat'));
+assert.ok(hits[1].offset > hits[0].offset && hits[1].snippet.toLowerCase().includes('cat'));
+assert.deepStrictEqual(searchBook(sb, '  '), []);
+assert.strictEqual(searchBook('a a a a', 'a', 2).length, 2); // respects max
+
+// normalizeDomain: strip scheme/www/path/port/case; reject junk.
+assert.strictEqual(normalizeDomain('https://WWW.Reddit.com/r/all?x=1'), 'reddit.com');
+assert.strictEqual(normalizeDomain('  instagram.com  '), 'instagram.com');
+assert.strictEqual(normalizeDomain('news.ycombinator.com:443'), 'news.ycombinator.com');
+assert.strictEqual(normalizeDomain('notadomain'), '');
+assert.strictEqual(normalizeDomain(''), '');
+
+// buildRedirectRules: one main_frame redirect per domain, unique ids, carries ?to=
+const rules = buildRedirectRules(['youtube.com', 'reddit.com'], 'abc123');
+assert.strictEqual(rules.length, 2);
+assert.deepStrictEqual(rules.map(r => r.id), [1, 2]);
+assert.ok(rules[0].action.redirect.regexSubstitution.startsWith('chrome-extension://abc123/reader.html?to='));
+assert.deepStrictEqual(rules[0].condition.resourceTypes, ['main_frame']);
+assert.ok(new RegExp(rules[1].condition.regexFilter).test('https://www.reddit.com/r/x'));
+assert.ok(!new RegExp(rules[1].condition.regexFilter).test('https://notreddit.com/x'));
 
 // detectStart: skip title/copyright/TOC front-matter, land on the first long prose block.
 const chapter = 'It was a cold morning when he finally understood. ' .repeat(12); // >500 chars

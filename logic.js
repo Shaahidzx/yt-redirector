@@ -1,9 +1,20 @@
 // Pure functions, no browser APIs, so they're unit-testable (see selfcheck.mjs).
 
-// Delay grows with age: base, then +step every rampEveryDays days, capped.
+// The delay grows GEOMETRICALLY: every day is the same small percentage longer than the
+// day before, so no two consecutive days ever feel different — it just compounds.
+// 1s → 300s over 100 days is +5.87%/day (day 10 ≈ 1.8s, day 50 ≈ 17s, day 100 = 5min).
 export function delaySeconds(cfg, installDate, now = Date.now()) {
-  const days = Math.floor((now - (installDate || now)) / 86400000);
-  return Math.min(cfg.cap, cfg.base + cfg.step * Math.floor(days / cfg.rampEveryDays));
+  // `x || default` would swallow a legitimate 0, so check for a finite number instead.
+  const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const start = Math.max(0.1, num(cfg?.startSeconds, 1));
+  const target = num(cfg?.targetSeconds, 300);
+  const days = num(cfg?.targetDays, 100);
+  if (target <= start || days <= 0) return target;
+  // `installDate || now` would swallow a legitimate 0 (epoch), so check for finite.
+  const installed = Number.isFinite(Number(installDate)) ? Number(installDate) : now;
+  const elapsed = Math.max(0, Math.floor((now - installed) / 86400000));
+  const f = Math.min(1, elapsed / days);
+  return Math.round(start * Math.pow(target / start, f) * 10) / 10;
 }
 
 // Reading units. Extracted text is newline-separated paragraphs.
@@ -108,7 +119,9 @@ export function highlightsMarkdown(book) {
   if (hs.length) {
     out.push('## Highlights', '');
     for (const h of hs) {
-      out.push(`- ${book.text.slice(h.start, h.end).trim().replace(/\s+/g, ' ')} _(${h.variant})_`);
+      let line = `- ${book.text.slice(h.start, h.end).trim().replace(/\s+/g, ' ')} _(${h.variant})_`;
+      if (h.note) line += `\n  - note: ${h.note.replace(/\s+/g, ' ').trim()}`;
+      out.push(line);
     }
     out.push('');
   }
@@ -120,6 +133,58 @@ export function highlightsMarkdown(book) {
   }
   if (!hs.length && !bm.length) out.push('_No highlights or bookmarks yet._');
   return out.join('\n');
+}
+
+// Find up to `max` case-insensitive matches of `query` in the book, each with a short
+// context snippet and its offset (Pro search). Pure so it's testable.
+export function searchBook(text, query, max = 20) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const lower = text.toLowerCase();
+  const out = [];
+  let i = lower.indexOf(q);
+  while (i !== -1 && out.length < max) {
+    const from = Math.max(0, i - 30);
+    const to = Math.min(text.length, i + q.length + 40);
+    let snippet = text.slice(from, to).replace(/\s+/g, ' ').trim();
+    if (from > 0) snippet = '…' + snippet;
+    if (to < text.length) snippet += '…';
+    out.push({ offset: i, snippet });
+    i = lower.indexOf(q, i + q.length);
+  }
+  return out;
+}
+
+// --- blocked sites ---------------------------------------------------------
+// Turn whatever the user typed ("https://WWW.Reddit.com/r/x") into a bare domain
+// ("reddit.com"). Returns '' for junk so callers can reject it.
+export function normalizeDomain(input) {
+  let s = String(input || '').trim().toLowerCase();
+  if (!s) return '';
+  s = s.replace(/^[a-z]+:\/\//, '');   // scheme
+  s = s.split('/')[0].split('?')[0].split('#')[0];
+  s = s.split('@').pop();              // userinfo
+  s = s.split(':')[0];                 // port
+  s = s.replace(/^www\./, '');
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(s)) return '';
+  return s;
+}
+
+// DNR redirect rules: any main-frame hit on a blocked domain goes to the reader, carrying
+// the original URL so "Continue" can send you back to the exact page.
+export function buildRedirectRules(domains, extId) {
+  return domains.map((d, i) => ({
+    id: i + 1,
+    priority: 1,
+    action: {
+      type: 'redirect',
+      redirect: { regexSubstitution: `chrome-extension://${extId}/reader.html?to=\\0` },
+    },
+    condition: {
+      regexFilter: `^https?://([a-z0-9-]+\\.)*${d.replace(/\./g, '\\.')}/.*`,
+      resourceTypes: ['main_frame'],
+    },
+  }));
 }
 
 // --- highlight rendering ---------------------------------------------------
