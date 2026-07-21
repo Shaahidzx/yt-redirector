@@ -327,6 +327,18 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 function requirePro() { if (pro) return true; window.open(cfg.proUrl, '_blank'); return false; }
 
 function wirePanel() {
+  // Accordion: one section open at a time, so the panel never becomes a long scroll.
+  const sections = [...$panel.querySelectorAll('section')];
+  sections.forEach((sec, i) => {
+    const h = sec.querySelector('h4');
+    if (!h) return;
+    if (i === 0) sec.classList.add('open');           // "Jump to" starts open
+    h.onclick = () => {
+      const wasOpen = sec.classList.contains('open');
+      sections.forEach(s => s.classList.remove('open'));
+      if (!wasOpen) sec.classList.add('open');
+    };
+  });
   $('menu').onclick = () => { $panel.classList.toggle('open'); if (book) refreshScrub(); };
   $('pclose').onclick = closePanel;
   const bump = (key, delta, lo, hi, round = (x) => x) => () => {

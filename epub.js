@@ -34,11 +34,10 @@ export async function extractEpub(buf) {
       .forEach(e => e.append('\n'));
     const t = (doc.body?.textContent || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
     if (!t) continue;
-    // Skip covers/title pages (<200 chars) from the chapter list, but keep their text.
-    if (t.length >= 200) {
-      const title = (heading || t.split('\n', 1)[0]).slice(0, 80);
-      chapters.push({ offset, title });
-    }
+    // Only list a real chapter heading. Without one we'd otherwise fall back to the first
+    // line of prose, which fills the contents with junk like "Copyright © 2017 by…".
+    const title = chapterTitle(heading, t);
+    if (title) chapters.push({ offset, title });
     parts.push(t);
     offset += t.length + 2; // account for the '\n\n' joiner between parts
   }
@@ -52,6 +51,21 @@ export async function extractEpub(buf) {
     if (files[p]) cover = new Blob([await inflate(files[p])], { type: ref.type || 'image/jpeg' });
   }
   return { text: parts.join('\n\n'), chapters, cover };
+}
+
+// A contents entry is worth showing only if it's an actual heading (or a short title-like
+// first line) and isn't front-matter/back-matter boilerplate.
+const NOT_A_CHAPTER = /copyright|all rights reserved|\bisbn\b|acknowledg|about the author|^index$|^notes?$|^contents$|dedication|title page|also by|praise for|thank you for buying|newsletter|colophon|permissions/i;
+function chapterTitle(heading, text) {
+  let t = (heading || '').replace(/\s+/g, ' ').trim();
+  if (!t) {
+    // No heading: accept only a short, title-ish opening line.
+    const first = text.split('\n', 1)[0].replace(/\s+/g, ' ').trim();
+    if (first.length > 0 && first.length <= 60 && !/[.!?]$/.test(first)) t = first;
+  }
+  if (!t || t.length > 80) return null;
+  if (NOT_A_CHAPTER.test(t)) return null;
+  return t;
 }
 
 function findCover(opf) {
