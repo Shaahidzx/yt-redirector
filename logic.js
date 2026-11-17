@@ -1,22 +1,5 @@
 // Pure functions, no browser APIs, so they're unit-testable (see selfcheck.mjs).
 
-// The delay grows GEOMETRICALLY: every day is the same small percentage longer than the
-// day before, so no two consecutive days ever feel different — it just compounds.
-// 1s → 300s over 100 days is +5.87%/day (day 10 ≈ 1.8s, day 50 ≈ 17s, day 100 = 5min).
-export function delaySeconds(cfg, installDate, now = Date.now()) {
-  // `x || default` would swallow a legitimate 0, so check for a finite number instead.
-  const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
-  const start = Math.max(0.1, num(cfg?.startSeconds, 1));
-  const target = num(cfg?.targetSeconds, 300);
-  const days = num(cfg?.targetDays, 100);
-  if (target <= start || days <= 0) return target;
-  // `installDate || now` would swallow a legitimate 0 (epoch), so check for finite.
-  const installed = Number.isFinite(Number(installDate)) ? Number(installDate) : now;
-  const elapsed = Math.max(0, Math.floor((now - installed) / 86400000));
-  const f = Math.min(1, elapsed / days);
-  return Math.round(start * Math.pow(target / start, f) * 10) / 10;
-}
-
 // Reading units. Extracted text is newline-separated paragraphs.
 // ponytail: naive sentence regex; "Mr." / "e.g." will split a beat early. Fix only if it grates.
 const SENTENCE_END = /[.!?]["'”’)\]]?(?=\s|$)/;
@@ -55,6 +38,32 @@ export function paragraphStartAt(text, offset) {
   return nl < 0 ? 0 : nl + 1;
 }
 
+// Sentence stepping (the reader shows one sentence per page).
+const skipWs = (text, i) => { while (i < text.length && /\s/.test(text[i])) i++; return i; };
+
+// Start of the sentence after the one starting at `start` (may cross into the next paragraph).
+export function nextSentenceStart(text, start) {
+  return skipWs(text, sentenceEnd(text, start));
+}
+
+// Snap any offset to the start of the sentence it falls in (whitespace after a sentence
+// belongs to that sentence).
+export function sentenceStartAt(text, offset) {
+  let s = paragraphStartAt(text, offset);
+  for (;;) {
+    const n = nextSentenceStart(text, s);
+    if (offset < n || n <= s) return s;
+    s = n;
+  }
+}
+
+// Start of the sentence before the one at `start` (for stepping back).
+export function prevSentenceStart(text, start) {
+  let i = start - 1;
+  while (i >= 0 && /\s/.test(text[i])) i--;
+  return i < 0 ? 0 : sentenceStartAt(text, i);
+}
+
 // Scrubber math: map a percent (0–100) over the readable span [floor, len] to an offset,
 // and back. Kept as a pair so the slider and the % label stay consistent.
 export function percentToOffset(text, pct, floor = 0) {
@@ -90,29 +99,7 @@ export function detectStart(text, minChars = 500) {
   return 0;
 }
 
-// --- reading streak --------------------------------------------------------
-// Local calendar day, e.g. "2026-7-19". Local (not UTC) so the day flips at the
-// reader's midnight, not the server's.
-export function dayKey(date = new Date()) {
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-}
-export function prevKey(key) {
-  const [y, mo, d] = key.split('-').map(Number);
-  const t = new Date(y, mo - 1, d - 1);
-  return dayKey(t);
-}
-// Advance the streak for a read that happened on `todayKey`. Same day = no change;
-// consecutive day = +1; any gap = reset to 1. Best is the high-water mark.
-export function updateStreak(state, todayKey) {
-  const s = { last: state.last || null, current: state.current || 0, best: state.best || 0 };
-  if (s.last === todayKey) return s;
-  s.current = s.last === prevKey(todayKey) ? s.current + 1 : 1;
-  s.best = Math.max(s.best, s.current);
-  s.last = todayKey;
-  return s;
-}
-
-// Export a book's highlights + bookmarks as Markdown (Pro feature).
+// Export a book's highlights + bookmarks as Markdown.
 export function highlightsMarkdown(book) {
   const out = ['# ' + book.name, ''];
   const hs = [...(book.highlights || [])].sort((a, b) => a.start - b.start);
@@ -136,7 +123,7 @@ export function highlightsMarkdown(book) {
 }
 
 // Find up to `max` case-insensitive matches of `query` in the book, each with a short
-// context snippet and its offset (Pro search). Pure so it's testable.
+// context snippet and its offset. Pure so it's testable.
 export function searchBook(text, query, max = 20) {
   const q = query.trim().toLowerCase();
   if (!q) return [];
@@ -208,4 +195,49 @@ export function buildSegments(from, to, highlights = []) {
     segs.push({ start: a, end: b, variant });
   }
   return segs;
+}
+
+// --- speed reading (RSVP) --------------------------------------------------
+// Optimal recognition point: the letter the eye fixes on, a bit left of centre.
+export function orpIndex(word) {
+  const n = word.length;
+  return n <= 1 ? 0 : n <= 5 ? 1 : n <= 9 ? 2 : n <= 13 ? 3 : 4;
+}
+
+// How long to show a word: linger on sentence ends, clause breaks and long words.
+export function wordDelay(word, wpm) {
+  let ms = 60000 / wpm;
+  if (/[.!?]["'”’)\]]*$/.test(word)) ms *= 2.2;
+  else if (/[,;:]["'”’)\]]*$/.test(word)) ms *= 1.5;
+  if (word.length > 8) ms *= 1.3;
+  return ms;
+}
+
+// Ease into speed after each Play: 50% of target, +10% per word, full by word 5.
+export function rampWpm(target, n) {
+  return target * Math.min(1, 0.5 + 0.1 * n);
+}
+
+// --- daily stats -----------------------------------------------------------
+// stats = {day:'YYYY-MM-DD', words, streak, days:{'YYYY-MM-DD':{words, lines, ms}}}.
+// `days` is the history behind the Today panel, trimmed to the last 60 days. Returns a new object.
+export function bumpStats(stats, today, words, lines = 0, ms = 0) {
+  const s = stats || {};
+  const prev = (s.days || {})[today] || { words: 0, lines: 0, ms: 0 };
+  const days = { ...s.days, [today]: { words: prev.words + words, lines: prev.lines + lines, ms: prev.ms + ms } };
+  for (const k of Object.keys(days).sort().slice(0, -60)) delete days[k];
+  if (s.day === today) return { ...s, words: (s.words || 0) + words, days };
+  const y = new Date(today + 'T00:00:00Z');
+  y.setUTCDate(y.getUTCDate() - 1);
+  const yesterday = y.toISOString().slice(0, 10);
+  return { day: today, words, streak: s.day === yesterday ? (s.streak || 0) + 1 : 1, days };
+}
+
+// Display title from a file name: drop the extension and download-site tags
+// like "(z-library.sk, 1lib.sk)". ponytail: TLD list covers the usual shadow libraries.
+export function bookTitle(name) {
+  return String(name || '')
+    .replace(/\.(pdf|epub|txt)$/i, '')
+    .replace(/\s*\([^)]*\b[\w-]+\.(?:sk|com|org|net|io|to|ru|is|li|se)\b[^)]*\)/gi, '')
+    .replace(/\s+/g, ' ').trim() || String(name || '');
 }

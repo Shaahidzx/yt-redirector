@@ -4,45 +4,46 @@
   <meta charset="utf-8">
   <title>Read</title>
   <style>
-    @font-face { font-family: 'OpenDyslexic'; font-display: swap;
-      src: url('fonts/OpenDyslexic-Regular.woff2') format('woff2'); }
     :root {
       color-scheme: light dark;
       --bg: #faf8f3; --fg: #2b2b2b; --accent: #c0392b;
-      --fs: 19px; --lh: 1.7; --w: 660px; --ls: 0px;
+      --fs: 19px; --lh: 1.7; --w: 660px;
       --ff: Georgia, "Times New Roman", serif;
     }
     @media (prefers-color-scheme: dark) { :root { --bg: #14140f; --fg: #d8d4c7; } }
-    /* Explicit theme choices override the system default. (Custom colors are set inline.) */
-    :root[data-theme="light"] { --bg: #faf8f3; --fg: #2b2b2b; }
-    :root[data-theme="dark"]  { --bg: #14140f; --fg: #d8d4c7; }
-    :root[data-theme="sepia"] { --bg: #f4ecd8; --fg: #5b4636; }
-    :root[data-theme="nord"]  { --bg: #2e3440; --fg: #d8dee9; --accent: #88c0d0; }
-    :root[data-theme="solarized"] { --bg: #fdf6e3; --fg: #586e75; --accent: #b58900; }
-    :root[data-font="sans"] { --ff: system-ui, -apple-system, sans-serif; }
-    :root[data-font="mono"] { --ff: ui-monospace, "SF Mono", Menlo, monospace; }
-    :root[data-font="dyslexic"] { --ff: 'OpenDyslexic', sans-serif; }
+    /* Reader fonts: system-installed only (no network). Each selector matches both the root
+       (active font) and its own button in the Font section, so every button previews itself. */
+    [data-font="serif"] { --ff: Georgia, "Times New Roman", serif; }
+    [data-font="charter"] { --ff: Charter, "Bitstream Charter", "Sitka Text", Cambria, serif; }
+    [data-font="iowan"] { --ff: "Iowan Old Style", "Palatino Linotype", "URW Palladio L", serif; }
+    [data-font="palatino"] { --ff: Palatino, "Palatino Linotype", "Book Antiqua", serif; }
+    [data-font="baskerville"] { --ff: Baskerville, "Libre Baskerville", "Baskerville Old Face", serif; }
+    [data-font="sans"] { --ff: system-ui, -apple-system, sans-serif; }
+    [data-font="humanist"] { --ff: Seravek, "Gill Sans Nova", Ubuntu, Calibri, sans-serif; }
+    [data-font="avenir"] { --ff: "Avenir Next", Avenir, Corbel, "URW Gothic", sans-serif; }
+    [data-font="legible"] { --ff: "Atkinson Hyperlegible", Verdana, Tahoma, sans-serif; }
     body {
-      margin: 0; padding: 8vh 0 12vh;
+      margin: 0;
       font: var(--fs)/var(--lh) var(--ff);
-      letter-spacing: var(--ls);
       background: var(--bg); color: var(--fg);
     }
-    main { max-width: var(--w); margin: 0 auto; padding: 0 24px; }
+    /* The page sits in the middle of the screen; a long sentence just flows from the top. */
+    main { max-width: var(--w); margin: 0 auto; padding: 90px 24px 12vh; box-sizing: border-box;
+      min-height: 100vh; display: flex; flex-direction: column; justify-content: center; }
     #text { white-space: pre-wrap; }
-    #more, #earlier {
-      display: block; margin: 28px auto; padding: 8px 18px;
-      font: inherit; font-size: 15px; background: none;
-      border: 1px solid currentColor; border-radius: 6px;
-      color: inherit; opacity: .55; cursor: pointer;
-    }
-    #more:hover, #earlier:hover { opacity: .9; }
+    /* Teleprompter: the sentence you just read stays above, greyed, showing its last few
+       lines so you can see where you left off. Click it (or ←) to step back. */
+    #prev { display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
+      max-height: calc(4em * var(--lh)); margin-bottom: 1em; opacity: .32; cursor: pointer;
+      white-space: pre-wrap; -webkit-mask-image: linear-gradient(transparent, #000 45%);
+      mask-image: linear-gradient(transparent, #000 45%); }
+    #prev[hidden] { display: none; }
     #empty { opacity: .7; font-size: 16px; }
     #empty a { color: inherit; }
     /* Deliberately plain and quiet — nothing that screams "blocked" over your shoulder. */
     footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center;
       padding: 14px; background: linear-gradient(transparent, var(--bg) 40%); }
-    /* Hover-revealed top bar: progress + book switcher. Hidden so it never nags. */
+    /* Hover-revealed top bar: stats + book switcher. Hidden so it never nags. */
     #bar {
       position: fixed; top: 0; left: 0; right: 0; z-index: 5;
       opacity: 0; transition: opacity .18s; pointer-events: none;
@@ -52,10 +53,12 @@
        pointer-events:none, so a hover at the top edge passes through to #hot and
        reveals the bar; once revealed the bar is on top and its buttons are clickable. */
     #hot { position: fixed; top: 0; left: 0; right: 0; height: 14px; z-index: 4; }
-    #progress { height: 3px; background: var(--accent); width: 0; transition: width .2s; }
+    /* Always-visible reading progress: faint track, accent fill. No numbers on purpose. */
+    #progress { position: fixed; left: 0; right: 0; bottom: 0; height: 3px; z-index: 8;
+      background: linear-gradient(var(--accent), var(--accent)) no-repeat #8882;
+      background-size: var(--p, 0%) 100%; transition: background-size .25s; pointer-events: none; }
     #barrow { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
       font: 13px system-ui, sans-serif; background: #00000018; backdrop-filter: blur(3px); }
-    #streak { opacity: .85; white-space: nowrap; }
     #books { display: flex; gap: 4px; }
     /* Always-available back-to-top, appears once scrolled down. */
     #totop { position: fixed; right: 18px; bottom: 74px; z-index: 8;
@@ -64,12 +67,12 @@
       box-shadow: 0 3px 10px #0006; }
     #totop[hidden] { display: none; }
     /* Reader menu + slide-in panel */
-    #menu { position: fixed; right: 18px; top: 14px; z-index: 8;
+    #menu { position: fixed; left: 18px; top: 14px; z-index: 8;
       width: 36px; height: 36px; border-radius: 8px; border: none; cursor: pointer;
       font: 17px system-ui, sans-serif; background: #8883; color: var(--fg); }
-    #panel { position: fixed; top: 0; right: 0; bottom: 0; width: 300px; max-width: 82vw;
-      z-index: 9; background: var(--bg); color: var(--fg); box-shadow: -4px 0 22px #0006;
-      transform: translateX(100%); transition: transform .2s; overflow-y: auto;
+    #panel { position: fixed; top: 0; left: 0; bottom: 0; width: 300px; max-width: 82vw;
+      z-index: 9; background: var(--bg); color: var(--fg); box-shadow: 4px 0 22px #0006;
+      transform: translateX(-100%); transition: transform .2s; overflow-y: auto;
       padding: 16px 18px; font: 14px system-ui, sans-serif; }
     #panel.open { transform: translateX(0); }
     /* Accordion: headings toggle their section, so the panel is always a short list. */
@@ -89,16 +92,23 @@
     #panel button { font: inherit; padding: 5px 10px; border: 1px solid #8886;
       border-radius: 6px; background: none; color: inherit; cursor: pointer; }
     #panel button.on { background: var(--accent); color: #fff; border-color: transparent; }
-    #getproR { display: inline-block; padding: 6px 12px; border-radius: 6px;
-      background: var(--accent); color: #fff; text-decoration: none; font: inherit; }
     #panel input[type="color"] { width: 34px; height: 26px; padding: 0; border: 1px solid #8886;
       border-radius: 5px; background: none; cursor: pointer; }
     #panel .lbl { opacity: .6; font-size: 12px; }
-    #search { width: 100%; }
+    /* Find-in-book: opens under the icon row from the search icon (or "/"). */
+    #find { margin: 16px auto 0; width: min(440px, 100%); font: 14px system-ui, sans-serif; }
+    #find[hidden] { display: none; }
+    #search { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 16px;
+      border: 1px solid #8885; border-radius: 999px; background: #8881; color: inherit; outline: none; }
+    #search:focus { border-color: var(--fg); }
     #searchResults { margin-top: 6px; }
-    #searchResults .hit { display: block; width: 100%; text-align: left; margin: 3px 0;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-    /* Inline note editor for highlights */
+    #searchResults .hit { display: block; width: 100%; text-align: left; padding: 8px 16px;
+      background: none; border: none; border-radius: 12px; color: inherit; cursor: pointer;
+      font: inherit; font-size: 13px; opacity: .75;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #searchResults .hit:hover { background: #8882; opacity: 1; }
+    #searchResults .lbl { padding: 8px 16px; font-size: 13px; opacity: .6; }
+    /* Inline note editor */
     #noteEditor { position: absolute; display: none; z-index: 8; width: 240px;
       padding: 8px; border-radius: 8px; background: #222; box-shadow: 0 4px 14px #0007; }
     #noteEditor textarea { width: 100%; height: 60px; box-sizing: border-box; resize: vertical;
@@ -107,7 +117,7 @@
     #noteEditor button { font: 12px system-ui; padding: 3px 10px; border: none; border-radius: 5px;
       cursor: pointer; background: #444; color: #fff; }
     #noteEditor button.save { background: var(--accent); }
-    mark[data-hl] { cursor: pointer; }
+    mark[data-hl][title] { cursor: pointer; }
     #panel section[hidden] { display: none; }
     #scrub { width: 100%; accent-color: var(--accent); }
     #scrubpct { opacity: .6; font-size: 12px; }
@@ -124,53 +134,196 @@
       max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     #books button.on { background: #c0392b33; opacity: 1; }
-    /* Highlights */
-    mark { color: inherit; border-radius: 2px; padding: 0 1px; }
-    mark.hl-yellow { background: rgba(255,214,0,.38); }
-    mark.hl-green  { background: rgba(60,205,130,.34); }
-    mark.hl-pink   { background: rgba(255,105,155,.34); }
-    mark.hl-blue   { background: rgba(90,160,255,.34); }
-    mark.hl-underline { background: none; text-decoration: underline wavy currentColor; }
-    /* Selection toolbar */
-    #hltools { position: absolute; display: none; gap: 6px; z-index: 8;
-      padding: 6px 8px; border-radius: 8px; background: #222; box-shadow: 0 4px 14px #0007; }
-    #hltools .sw { width: 18px; height: 18px; border-radius: 50%; border: 1px solid #fff3;
-      cursor: pointer; padding: 0; }
-    #hltools .sw.hl-underline { background: #444; color: #fff; font: 12px system-ui;
-      display: grid; place-items: center; }
-    #hltools .erase { background: #444; color: #fff; border: none; border-radius: 5px;
-      cursor: pointer; font: 12px system-ui; padding: 0 6px; }
-    #go {
-      font: 14px system-ui, sans-serif; padding: 7px 16px;
-      border: none; border-radius: 6px; background: #8a8a8a33; color: inherit;
-      cursor: not-allowed; opacity: .6;
+    /* Highlights are gone; old ones render as plain text. A line with a note gets a
+       quiet dotted underline you can click to reopen it. */
+    mark { background: none; color: inherit; }
+    mark[title] { text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+      text-underline-offset: .25em; }
+    /* Bionic text: bold first half of each word */
+    #text b { font-weight: 700; }
+    /* RSVP speed reading: one word, focus letter pinned to the centre column */
+    /* Energy meter: fills one notch per sentence toward a session goal, glows harder as it
+       fills, flashes and levels up when full. Sits under the hover bar and the RSVP overlay. */
+    /* Level bar: one slim row in the page's own colours — level, book, glowing meter, %. */
+    #energy { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 8;
+      width: min(460px, calc(100vw - 120px)); box-sizing: border-box; height: 34px;
+      display: flex; align-items: center; gap: 10px; padding: 0 14px; pointer-events: none;
+      border-radius: 999px; color: var(--fg); font: 500 12px/1 system-ui, -apple-system, sans-serif;
+      background: color-mix(in srgb, var(--fg) 6%, var(--bg));
+      border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+      box-shadow: 0 6px 18px -10px #0005; }
+    #energy[hidden] { display: none; }
+    #ehead { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; }
+    #ehead svg { flex: none; width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.8;
+      stroke-linecap: round; opacity: .7; }
+    #elabel { flex: none; font-weight: 600; }
+    #etitle { min-width: 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      padding: 3px 9px; border-radius: 999px; font-size: 11px; opacity: .6;
+      border: 1px solid color-mix(in srgb, var(--fg) 15%, transparent); }
+    #emeter { position: relative; flex: 1 1 80px; min-width: 60px; height: 8px; border-radius: 999px;
+      background: color-mix(in srgb, var(--fg) 12%, transparent); }
+    #efill { position: absolute; inset: 0 auto 0 0; width: calc(var(--e, 0) * 100%); border-radius: inherit;
+      background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, #fff), var(--accent));
+      box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
+      transition: width .45s cubic-bezier(.2,.8,.2,1); }
+    #epct { flex: none; min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
+    #epct span { opacity: .5; }
+    #energy.full #efill { animation: flash .7s ease-out; }
+    #energy.full #epct { animation: pop .6s ease-out; }
+    @keyframes flash { 0% { filter: brightness(1.6); box-shadow: 0 0 18px 3px var(--accent); } }
+    @keyframes pop { 0% { transform: scale(1.25); } 100% { transform: scale(1); } }
+    /* Each new sentence rises in, so "Read on" feels like moving forward, not a swap. */
+    #text.rise { animation: rise .2s ease-out; }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+    @media (prefers-reduced-motion: reduce) {
+      #text.rise, #energy.full #efill, #energy.full #epct { animation: none; }
     }
-    #go.ready { cursor: pointer; opacity: 1; background: #c0392b22; }
+    /* One quiet icon row under the line: star, highlight, note, speed read, next. */
+    #controls { display: flex; justify-content: center; align-items: center; gap: 4px; margin-top: 32px; }
+    #controls button { display: grid; place-items: center; width: 38px; height: 38px; padding: 0;
+      background: none; color: inherit; border: none; border-radius: 50%; opacity: .4; cursor: pointer;
+      transition: opacity .15s, background .15s; }
+    #controls button[hidden] { display: none; }
+    #controls button:hover { opacity: .9; background: #8882; }
+    #controls button.on { opacity: .9; color: var(--accent); }
+    #controls button:disabled { opacity: .15; cursor: default; background: none; }
+    #controls svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.7;
+      stroke-linecap: round; stroke-linejoin: round; }
+    #qStar.on svg { fill: currentColor; }
+    #controls #more:not(:hover):not(:disabled) { opacity: .75; }  /* the main action reads a touch stronger */
+    /* Today: summary + a 14-day pill-bar chart of minutes read (drawn as SVG in reader.js). */
+    .tdhead { font-size: 15px; font-weight: 600; margin: 4px 0 2px; }
+    #panel section.open #tdChart { display: block; margin: 14px 0 8px -66px;
+      width: calc(100% + 66px); max-width: none; }
+    #tdChart svg { display: block; width: 100%; height: auto; overflow: visible; }
+    #tdChart text { fill: currentColor; font: 9px var(--mono); opacity: .6; letter-spacing: .04em; }
+    #tdChart .axis { stroke: currentColor; stroke-width: 1; opacity: .55; }
+    #tdChart .bar { stroke: var(--fg); stroke-width: 8; stroke-linecap: round; }
+    #tdChart .bar.now { stroke: var(--accent); }
+    #tdChart .bar.zero { opacity: .15; }
+    #rsvp { position: fixed; inset: 0; z-index: 7; background: var(--bg);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; }
+    #rsvp[hidden] { display: none; }
+    #rword { display: grid; grid-template-columns: 1fr auto 1fr; width: 100%;
+      font-size: calc(var(--fs) * 2.2); line-height: 1.2; white-space: pre; }
+    #rword :first-child { text-align: right; }
+    #rword :nth-child(2) { color: var(--accent); }
+    #rhint { font: 13px system-ui, sans-serif; opacity: .6; }
+    #stats { flex: 1; opacity: .75; }
+    #go {
+      font: 14px system-ui, sans-serif; padding: 7px 16px; cursor: pointer;
+      border: none; border-radius: 6px; background: #c0392b22; color: inherit;
+    }
+
+    /* --- Panel: spec-sheet look. Monospace, hairline rules, numbered sections;
+       the open section's number goes big and dark, the rest stay ghosted. --- */
+    #menu, #pclose { display: grid; place-items: center; background: none; border: none;
+      padding: 0; color: var(--fg); cursor: pointer; }
+    #menu { width: 40px; height: 40px; opacity: .7; }
+    #menu:hover { opacity: 1; }
+    #menu svg, #pclose svg { fill: none; stroke: currentColor; stroke-width: 1.3; }
+    #panel { --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      width: 340px; padding: 28px 28px 40px; font: 12px/1.5 var(--mono);
+      letter-spacing: .03em; box-shadow: none; border-right: 1px solid #8884;
+      counter-reset: sec; }
+    #phead { padding-bottom: 22px; border-bottom: 1.5px solid var(--fg); }
+    #phead strong { font: 500 15px var(--mono); letter-spacing: .32em; text-transform: uppercase; }
+    #panel #pclose { border: none; padding: 0; width: 32px; height: 32px; }
+    #panel section { border-bottom: 1px solid #8886; counter-increment: sec; }
+    #panel h4, #panel section:first-of-type h4 { border-top: none; opacity: 1; gap: 14px;
+      padding: 14px 0; font: 11px var(--mono); letter-spacing: .16em; }
+    #panel h4::before { content: counter(sec, decimal-leading-zero); transform: none;
+      width: 52px; flex: none; font: 700 22px/1 var(--mono); letter-spacing: -.02em; opacity: .16;
+      transition: font-size .2s, opacity .2s; }
+    #panel section.open h4::before { transform: none; opacity: 1; font-size: 34px; }
+    #panel section.open h4 { font-weight: 700; }
+    #panel h4:hover::before { opacity: .45; }
+    #panel section.open h4:hover::before { opacity: 1; }
+    #panel section.open { padding-bottom: 18px; }
+    /* Open content sits in the label column (number 52px + 14px gap), like a ruled spec sheet. */
+    /* Indent via padding (not child margins) so width:100% inputs stop at the rule. */
+    #panel section.open { padding-left: 66px; }
+    #panel section.open h4 { margin-left: -66px; }
+    #panel section.open > :not(h4) { box-sizing: border-box; max-width: 100%; }
+    #panel button { border-radius: 0; border: 1px solid var(--fg); padding: 6px 10px;
+      font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    #panel button:hover { background: #8882; }
+    #panel button.on { background: var(--fg); color: var(--bg); }
+    /* Theme buttons wear their own palette; mark the active one with an outline instead. */
+    #panel #themes button { text-transform: capitalize; }
+    #panel #themes button.on { outline: 2px solid var(--fg); outline-offset: 2px; }
+    #panel .row { gap: 6px; }
+    #panel section:not(.open) > :not(h4) { display: none; } /* beats `#panel .row` */
+    #panel .row + .row { margin-top: 10px; }
+    #panel section .lbl { margin-top: 12px; line-height: 1.8; }
+    #scrubpct { margin-top: 6px; }
+    #panel .lbl, #scrubpct { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; opacity: .55; }
+    /* Library shelf: small cover grid, active book outlined. */
+    #shelf, #panel section.open > #shelf { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 14px; }
+    #panel #shelf .book { display: flex; flex-direction: column; gap: 4px; padding: 0; border: none;
+      text-align: left; text-transform: none; letter-spacing: .02em; min-width: 0; }
+    #panel #shelf .book:hover { background: none; }
+    #shelf .cover { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; display: block;
+      border: 1px solid #8886; box-sizing: border-box; overflow: hidden; padding: 4px;
+      font-size: 11px; line-height: 1.3; }
+    #shelf img.cover { padding: 0; }
+    #shelf .book:hover .cover { border-color: var(--fg); }
+    #shelf .book.on .cover { outline: 2px solid var(--fg); outline-offset: 2px; }
+    #panel #shelf .book.on { background: none; color: inherit; }
+    #shelf .bname { font-size: 11px; line-height: 1.35; overflow: hidden; display: -webkit-box;
+      -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+    #shelf .bmeta { font-size: 11px; opacity: .55; white-space: nowrap; }
+    #wpmVal { padding: 0 12px; font-weight: 700; }
+    #panel input[type="color"] { border-radius: 0; border-color: var(--fg); margin-left: 8px; }
+    #scrub { accent-color: var(--fg); margin: 4px 0 0; }
+    /* Font buttons show themselves in their own typeface. */
+    #panel #fonts button[data-font] { font: 14px var(--ff); letter-spacing: 0; text-transform: none; }
+    #panel #chapters button { border: none; border-bottom: 1px solid #8883;
+      padding: 7px 0; text-transform: none; letter-spacing: .02em; font-size: 12px; margin: 0; }
+    #panel #bmarks .bm { border-bottom: 1px solid #8883; margin: 0; }
+    #panel #bmarks .bm button { border: none; }
   </style>
 </head>
 <body>
   <div id="hot"></div>
+  <div id="energy" hidden>
+    <div id="ehead">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>
+      <span id="elabel"></span><span id="etitle"></span>
+    </div>
+    <div id="emeter"><div id="efill"></div></div>
+    <div id="epct"><b id="enum" style="font-weight:inherit">0</b><span>%</span></div>
+  </div>
   <div id="bar">
-    <div id="progress"></div>
     <div id="barrow">
-      <span id="streak"></span>
-      <span style="flex:1"></span>
+      <span id="stats"></span>
       <div id="books"></div>
     </div>
   </div>
   <button id="totop" hidden title="Back to top">↑</button>
-  <button id="menu" title="Reader menu">☰</button>
+  <button id="menu" title="Reader menu" aria-label="Reader menu">
+    <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 9h18M3 15h18"/></svg>
+  </button>
   <aside id="panel">
-    <div id="phead"><strong>Reader</strong><button id="pclose">✕</button></div>
+    <div id="phead"><strong>Reader</strong>
+      <button id="pclose" aria-label="Close menu"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 4l16 16M20 4L4 20"/></svg></button>
+    </div>
+    <section>
+      <h4>Today</h4>
+      <div id="tdHead" class="tdhead"></div>
+      <div id="tdSpeed" class="lbl"></div>
+      <div id="tdChart"></div>
+      <div id="tdCons" class="lbl"></div>
+    </section>
+    <section>
+      <h4>Library</h4>
+      <div id="shelf"></div>
+      <div class="row"><button id="libManage">Add or manage books →</button></div>
+    </section>
     <section>
       <h4>Jump to</h4>
       <input id="scrub" type="range" min="0" max="100" value="0">
       <div id="scrubpct">0%</div>
-    </section>
-    <section>
-      <h4>Search</h4>
-      <input id="search" type="search" placeholder="Find in book ★">
-      <div id="searchResults"></div>
     </section>
     <section id="tocSec" hidden>
       <h4>Contents</h4>
@@ -178,8 +331,15 @@
     </section>
     <section>
       <h4>Bookmarks</h4>
-      <button id="bmAdd">＋ Bookmark this spot</button>
       <div id="bmarks"></div>
+    </section>
+    <section>
+      <h4>Speed read</h4>
+      <div class="row">
+        <button id="wpmDown">WPM −</button><span id="wpmVal"></span><button id="wpmUp">WPM +</button>
+      </div>
+      <div class="row"><button id="rsvpStart">⚡ Start speed reading</button></div>
+      <div class="lbl">Space play/pause<br>↑↓ speed · ← rewind<br>Esc exit</div>
     </section>
     <section>
       <h4>Text</h4>
@@ -187,53 +347,63 @@
         <button id="fsDown">A−</button><button id="fsUp">A+</button>
         <button id="lhDown">Spacing −</button><button id="lhUp">Spacing +</button>
         <button id="wDown">Width −</button><button id="wUp">Width +</button>
-        <button id="lsDown" data-pro>Letter −★</button><button id="lsUp" data-pro>Letter +★</button>
       </div>
     </section>
     <section>
       <h4>Theme</h4>
-      <div class="row" id="themes">
-        <button data-theme="system">System</button>
-        <button data-theme="light">Light</button>
-        <button data-theme="dark">Dark</button>
-        <button data-theme="sepia">Sepia</button>
-        <button data-theme="nord" data-pro>Nord ★</button>
-        <button data-theme="solarized" data-pro>Solarized ★</button>
-        <button data-theme="custom" data-pro>Custom ★</button>
-      </div>
+      <div class="row" id="themes"></div>
       <div class="row" style="margin-top:6px">
-        <span class="lbl">Custom colors ★</span>
-        <input id="customBg" type="color" title="Background" data-pro>
-        <input id="customFg" type="color" title="Text" data-pro>
+        <span class="lbl">Custom colors</span>
+        <input id="customBg" type="color" title="Background">
+        <input id="customFg" type="color" title="Text">
       </div>
     </section>
     <section>
       <h4>Font</h4>
       <div class="row" id="fonts">
-        <button data-font="serif">Serif</button>
-        <button data-font="sans" data-pro>Sans ★</button>
-        <button data-font="mono" data-pro>Mono ★</button>
-        <button data-font="dyslexic" data-pro>Dyslexic ★</button>
+        <button data-font="serif">Georgia</button>
+        <button data-font="charter">Charter</button>
+        <button data-font="iowan">Iowan</button>
+        <button data-font="palatino">Palatino</button>
+        <button data-font="baskerville">Baskerville</button>
+        <button data-font="sans">System</button>
+        <button data-font="humanist">Seravek</button>
+        <button data-font="avenir">Avenir</button>
+        <button data-font="legible" title="Wide, open letters — easiest to read">Legible</button>
       </div>
+      <div class="row"><button id="bionic" title="Bold the first half of each word">Bionic</button></div>
     </section>
     <section>
-      <h4>Pro</h4>
-      <button id="export" data-pro>⬇ Export highlights ★</button>
-      <div style="margin-top:8px"><a id="getproR" target="_blank" rel="noopener">★ Get Pro</a></div>
+      <h4>Notes</h4>
+      <button id="export">⬇ Export notes &amp; bookmarks</button>
     </section>
   </aside>
-  <div id="hltools"></div>
   <div id="noteEditor">
-    <textarea id="noteText" placeholder="Note on this highlight…"></textarea>
+    <textarea id="noteText" placeholder="Note on this line…"></textarea>
     <div class="row"><button id="noteDel">Delete note</button><button id="noteSave" class="save">Save</button></div>
   </div>
+  <div id="rsvp" hidden>
+    <div id="rword"><span></span><span></span><span></span></div>
+    <div id="rhint"></div>
+  </div>
+  <div id="progress"></div>
   <main>
-    <button id="earlier" hidden>↑ Read earlier</button>
+    <div id="prev" hidden title="Back a sentence (←)"><div></div></div>
     <div id="text"></div>
-    <button id="more" hidden>Read on ↓</button>
+    <div id="controls">
+      <button id="qStar" hidden title="Bookmark this line (B)" aria-label="Bookmark"><svg viewBox="0 0 24 24"><path d="M7 3.5h10v17l-5-4-5 4z"/></svg></button>
+      <button id="qNote" hidden title="Note on this line (N)" aria-label="Note"><svg viewBox="0 0 24 24"><path d="M5 5h14v10h-6l-4 4v-4H5z"/></svg></button>
+      <button id="qFind" hidden title="Search the book (/)" aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button>
+      <button id="speed" hidden title="Speed read (Space)" aria-label="Speed read"><svg viewBox="0 0 24 24"><path d="M13 3L5 13h6l-1 8 8-10h-6z"/></svg></button>
+      <button id="more" hidden title="Next line (→)" aria-label="Next line"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+    </div>
+    <div id="find" hidden>
+      <input id="search" type="search" placeholder="Find in book" autocomplete="off">
+      <div id="searchResults"></div>
+    </div>
     <p id="empty" hidden>No book loaded. Open the extension's <a id="opts" href="#">options</a> to add one.</p>
   </main>
-  <footer><button id="go" disabled>Continue to YouTube</button></footer>
+  <footer><button id="go">Continue to YouTube</button></footer>
   <script type="module" src="reader.js"></script>
 </body>
 </html>

@@ -1,28 +1,6 @@
-// Run: node selfcheck.mjs   — asserts the delay ramp, reading units, and start-detector behave.
+// Run: node selfcheck.mjs   — asserts reading units, and start-detector behave.
 import assert from 'node:assert';
-import { delaySeconds, sentenceEnd, paragraphEnd, prevParagraphStart, paragraphStartAt, percentToOffset, offsetToPercent, bookmarkLabel, highlightsMarkdown, searchBook, normalizeDomain, buildRedirectRules, detectStart, dayKey, prevKey, updateStreak, buildSegments } from './logic.js';
-
-const cfg = { startSeconds: 1, targetSeconds: 300, targetDays: 100 };
-const DAY = 86400000;
-const t0 = 1_700_000_000_000;
-const delayAt = (d) => delaySeconds(cfg, t0, t0 + d * DAY);
-
-// Delay curve: starts at `start`, reaches `target` on day N, then stays there.
-assert.strictEqual(delayAt(0), 1);
-assert.strictEqual(delayAt(100), 300);
-assert.strictEqual(delayAt(250), 300);                       // clamped past the target day
-assert.strictEqual(delaySeconds(cfg, undefined), 1);    // no install date yet
-
-// Strictly increasing, and never a jarring jump: the day-to-day RATIO is constant,
-// so day 1→2 feels exactly like day 50→51. That's the whole point of the curve.
-for (let d = 0; d < 100; d++) assert.ok(delayAt(d + 1) >= delayAt(d), `not increasing at day ${d}`);
-const early = delayAt(21) / delayAt(20), late = delayAt(71) / delayAt(70);
-assert.ok(Math.abs(early - late) < 0.01, `ratio drifted: ${early} vs ${late}`);
-assert.ok(early > 1.05 && early < 1.07, `expected ~+5.9%/day, got ${early}`);
-
-// Degenerate configs fall back to the target instead of exploding.
-assert.strictEqual(delaySeconds({ startSeconds: 5, targetSeconds: 5, targetDays: 10 }, t0, t0), 5);
-assert.strictEqual(delaySeconds({ startSeconds: 1, targetSeconds: 60, targetDays: 0 }, t0, t0), 60);
+import { nextSentenceStart, sentenceStartAt, prevSentenceStart, sentenceEnd, paragraphEnd, prevParagraphStart, paragraphStartAt, percentToOffset, offsetToPercent, bookmarkLabel, highlightsMarkdown, searchBook, normalizeDomain, buildRedirectRules, detectStart, buildSegments, orpIndex, wordDelay, rampWpm, bumpStats, bookTitle } from './logic.js';
 
 // Reading units. Paragraphs are newline-separated in our extracted text.
 const p1 = 'First para. It has two sentences.';
@@ -36,6 +14,18 @@ assert.strictEqual(txt.slice(11, sentenceEnd(txt, 11)).trim(), 'It has two sente
 // A heading line with no terminator returns the whole line, not heading + next sentence.
 const withHeading = 'Chapter One\n\nHe woke early. Then he rose.';
 assert.strictEqual(withHeading.slice(0, sentenceEnd(withHeading, 0)), 'Chapter One');
+
+// Sentence stepping: forward crosses paragraphs; snap and step back land on sentence starts.
+const s2 = txt.indexOf('It has'), s3 = txt.indexOf(p2);
+assert.strictEqual(nextSentenceStart(txt, 0), s2);
+assert.strictEqual(nextSentenceStart(txt, s2), s3);                       // into next paragraph
+assert.strictEqual(nextSentenceStart(txt, txt.indexOf(p3)), txt.length);  // end of book
+assert.strictEqual(sentenceStartAt(txt, s2 + 4), s2);
+assert.strictEqual(sentenceStartAt(txt, s2 - 1), 0);                      // trailing space → first sentence
+assert.strictEqual(sentenceStartAt(txt, s3), s3);
+assert.strictEqual(prevSentenceStart(txt, s3), s2);                       // back across the paragraph gap
+assert.strictEqual(prevSentenceStart(txt, s2), 0);
+assert.strictEqual(prevSentenceStart(txt, 0), 0);
 
 // paragraphEnd: exactly one paragraph forward; mid-paragraph start finishes that paragraph.
 assert.strictEqual(txt.slice(0, paragraphEnd(txt, 0)).trim(), p1);
@@ -112,19 +102,6 @@ assert.strictEqual(book.slice(at).startsWith(chapter.trim()[0]) && book.slice(at
 assert.ok(at > book.indexOf('Contents'));  // landed after the TOC
 assert.strictEqual(detectStart('short\n\nalso short'), 0); // nothing long → offset 0
 
-// Streak: prevKey handles month/year rollover; increment / reset / same-day / best.
-assert.strictEqual(prevKey('2026-3-1'), '2026-2-28');
-assert.strictEqual(prevKey('2026-1-1'), '2025-12-31');
-assert.strictEqual(dayKey(new Date(2026, 6, 19)), '2026-7-19'); // month is 1-based here
-let st = { last: null, current: 0, best: 0 };
-st = updateStreak(st, '2026-7-10'); assert.deepStrictEqual(st, { last: '2026-7-10', current: 1, best: 1 });
-st = updateStreak(st, '2026-7-10'); assert.strictEqual(st.current, 1);          // same day: no change
-st = updateStreak(st, '2026-7-11'); assert.strictEqual(st.current, 2);          // consecutive: +1
-st = updateStreak(st, '2026-7-12'); assert.strictEqual(st.current, 3);
-assert.strictEqual(st.best, 3);
-st = updateStreak(st, '2026-7-15'); assert.strictEqual(st.current, 1);          // 2-day gap: reset
-assert.strictEqual(st.best, 3);                                                 // best survives
-
 // buildSegments: middle highlight → text|mark|text; clip at edge; overlap → later wins; none → plain.
 let segs = buildSegments(0, 10, [{ start: 3, end: 6, variant: 'yellow' }]);
 assert.deepStrictEqual(segs, [
@@ -141,5 +118,34 @@ segs = buildSegments(0, 10, [{ start: 0, end: 10, variant: 'yellow' }, { start: 
 assert.strictEqual(segs.find(s => s.start === 2).variant, 'pink');  // later-added wins on overlap
 assert.strictEqual(segs.find(s => s.start === 5).variant, 'yellow');
 assert.deepStrictEqual(buildSegments(0, 4, []), [{ start: 0, end: 4, variant: null }]);
+
+// RSVP pacing.
+assert.deepStrictEqual(['a', 'word', 'sentence', 'extraordinarily'].map(orpIndex), [0, 1, 2, 4]);
+assert.ok(wordDelay('end.', 300) > wordDelay('mid,', 300) && wordDelay('mid,', 300) > wordDelay('word', 300));
+assert.ok(wordDelay('magnificent', 300) > wordDelay('word', 300));
+assert.strictEqual(rampWpm(400, 0), 200);
+assert.strictEqual(rampWpm(400, 9), 400);
+
+// Daily stats + streak.
+const strip = ({ days, ...rest }) => rest;
+assert.deepStrictEqual(strip(bumpStats(undefined, '2026-11-15', 5)), { day: '2026-11-15', words: 5, streak: 1 });
+assert.deepStrictEqual(strip(bumpStats({ day: '2026-11-15', words: 5, streak: 2 }, '2026-11-15', 3)), { day: '2026-11-15', words: 8, streak: 2 });
+assert.deepStrictEqual(strip(bumpStats({ day: '2026-11-30', words: 9, streak: 2 }, '2026-12-01', 1)), { day: '2026-12-01', words: 1, streak: 3 });
+assert.deepStrictEqual(strip(bumpStats({ day: '2026-11-10', words: 9, streak: 4 }, '2026-11-15', 1)), { day: '2026-11-15', words: 1, streak: 1 });
+// Per-day history accumulates words/lines/ms and keeps only the last 60 days.
+{
+  let st = bumpStats(undefined, '2026-11-15', 10, 1, 4000);
+  st = bumpStats(st, '2026-11-15', 5, 1, 1000);
+  assert.deepStrictEqual(st.days['2026-11-15'], { words: 15, lines: 2, ms: 5000 });
+  const old = {};
+  for (let i = 1; i <= 70; i++) old[`2026-01-${String(i).padStart(2, '0')}`] = { words: 1, lines: 0, ms: 0 };
+  const t = bumpStats({ day: '2026-11-14', words: 0, streak: 1, days: old }, '2026-11-15', 1);
+  assert.strictEqual(Object.keys(t.days).length, 60);
+  assert.ok(t.days['2026-11-15'] && !t.days['2026-01-01']);
+}
+
+// Book titles: strip extension + download-site tags, keep real parentheticals.
+assert.strictEqual(bookTitle('Alchemy (Rory Sutherland) (z-library.sk, 1lib.sk, z-lib.sk).epub'), 'Alchemy (Rory Sutherland)');
+assert.strictEqual(bookTitle('Deep Work.pdf'), 'Deep Work');
 
 console.log('ok');

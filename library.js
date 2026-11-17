@@ -1,72 +1,15 @@
 import { CONFIG } from './config.js';
 import * as pdfjs from './pdfjs/pdf.min.mjs';
 import { extractEpub } from './epub.js';
-import { detectStart, normalizeDomain, delaySeconds } from './logic.js';
+import { detectStart, normalizeDomain, bookTitle } from './logic.js';
 pdfjs.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('pdfjs/pdf.worker.min.mjs');
 
 const $status = document.getElementById('status');
-const $list = document.getElementById('list');
+const $shelf = document.getElementById('shelf');
 const $file = document.getElementById('file');
 const $drop = document.getElementById('drop');
 
-document.getElementById('getpro').href = CONFIG.proUrl;
-document.getElementById('getpro2').href = CONFIG.proUrl;
 $file.onchange = () => $file.files[0] && importFile($file.files[0]);
-
-// --- Pro license (Gumroad) -------------------------------------------------
-const $license = document.getElementById('license');
-const $activate = document.getElementById('activate');
-const $deactivate = document.getElementById('deactivate');
-const $proStatus = document.getElementById('proStatus');
-
-async function isPro() { return (await chrome.storage.local.get('pro')).pro === true; }
-
-async function refreshProUI() {
-  const p = await isPro();
-  document.getElementById('getpro').hidden = p;   // top-right "★ Get Pro"
-  document.getElementById('getpro2').hidden = p;  // "Get Pro →" in the Pro section
-  if (p) {
-    $proStatus.textContent = '✓ Pro active';
-    $proStatus.className = 'ok';
-    $license.hidden = true; $activate.hidden = true; $deactivate.hidden = false;
-  } else {
-    $proStatus.className = ''; $deactivate.hidden = true;
-    $license.hidden = false; $activate.hidden = false;
-  }
-}
-
-$activate.onclick = async () => {
-  const key = $license.value.trim();
-  if (!key) return;
-  $proStatus.textContent = 'Checking…'; $proStatus.className = '';
-  try {
-    const res = await fetch('https://api.gumroad.com/v2/licenses/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ product_id: CONFIG.gumroadProductId, license_key: key }),
-    });
-    const data = await res.json();
-    const p = data.purchase || {};
-    if (data.success && !p.refunded && !p.chargebacked && !p.disputed) {
-      await chrome.storage.local.set({ pro: true, license: key });
-      refreshProUI();
-    } else {
-      $proStatus.textContent = data.message || 'Invalid or refunded license.';
-      $proStatus.className = 'err';
-    }
-  } catch (e) {
-    $proStatus.textContent = 'Could not reach Gumroad. Check your connection.';
-    $proStatus.className = 'err';
-  }
-};
-
-$deactivate.onclick = async () => {
-  await chrome.storage.local.set({ pro: false, license: '' });
-  $proStatus.textContent = ''; $license.hidden = false; $activate.hidden = false;
-  refreshProUI();
-};
-
-refreshProUI();
 $drop.ondragover = (e) => { e.preventDefault(); };
 $drop.ondrop = (e) => { e.preventDefault(); e.dataTransfer.files[0] && importFile(e.dataTransfer.files[0]); };
 
@@ -74,10 +17,6 @@ render();
 
 async function importFile(file) {
   const { books = [] } = await chrome.storage.local.get('books');
-  if (!(await isPro()) && books.length >= CONFIG.maxBooks) {
-    $status.textContent = `Free limit is ${CONFIG.maxBooks} books — delete one, or Get Pro for unlimited.`;
-    return;
-  }
   $status.textContent = `Reading "${file.name}"…`;
   try {
     const name = file.name.toLowerCase();
@@ -145,33 +84,10 @@ async function coverFromBlob(blob) {
 
 async function render() {
   const { books = [], activeId } = await chrome.storage.local.get(['books', 'activeId']);
-  const $shelf = document.getElementById('shelf');
-  // Pro gets the cover shelf; free keeps the plain list.
-  if (await isPro()) {
-    $shelf.hidden = false;
-    $list.innerHTML = '';
-    renderShelf($shelf, books, activeId);
-    return;
-  }
-  $shelf.hidden = true;
-  $list.innerHTML = '';
-  for (const b of books) {
-    const el = document.createElement('div');
-    el.className = 'book' + (b.id === activeId ? ' active' : '');
-    const read = b.text.length ? Math.floor(((b.readPos - b.startOffset) / (b.text.length - b.startOffset)) * 100) : 0;
-    el.innerHTML = `
-      <h3>${escape(b.name)}</h3>
-      <small>${b.id === activeId ? '● active · ' : ''}${Math.max(0, read)}% read</small>
-      <div style="margin-top:10px">
-        <button data-act="active">${b.id === activeId ? 'Active' : 'Make active'}</button>
-        <button data-act="delete">Delete</button>
-      </div>`;
-    wire(el, b);
-    $list.append(el);
-  }
+  renderShelf($shelf, books, activeId);
 }
 
-// Uniform cover grid (Pro). Clicking a cover makes that book active.
+// Uniform cover grid. Clicking a cover makes that book active.
 function renderShelf(root, books, activeId) {
   root.replaceChildren();
   for (const b of books) {
@@ -190,13 +106,13 @@ function renderShelf(root, books, activeId) {
     } else {
       const ph = document.createElement('div');
       ph.className = 'ph';
-      ph.textContent = b.name.replace(/\.(pdf|epub|txt)$/i, '');
+      ph.textContent = bookTitle(b.name);
       art.append(ph);
     }
     art.onclick = () => update(s => (s.activeId = b.id));
 
     const h = document.createElement('h3');
-    h.textContent = b.name.replace(/\.(pdf|epub|txt)$/i, '');
+    h.textContent = bookTitle(b.name);
     const meta = document.createElement('small');
     meta.textContent = (b.id === activeId ? '● active · ' : '') + pct + '% read';
 
@@ -213,12 +129,6 @@ function renderShelf(root, books, activeId) {
   }
 }
 
-function wire(el, b) {
-  el.querySelector('[data-act=active]').onclick = () => update(s => (s.activeId = b.id));
-  el.querySelector('[data-act=delete]').onclick = () =>
-    update(s => (s.books = s.books.filter(x => x.id !== b.id), s.activeId === b.id && (s.activeId = s.books[0]?.id)));
-}
-
 async function update(mutate) {
   const state = await chrome.storage.local.get(['books', 'activeId']);
   state.books = state.books || [];
@@ -227,8 +137,6 @@ async function update(mutate) {
   render();
 }
 
-function escape(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
-
 // --- tabs ------------------------------------------------------------------
 document.querySelectorAll('#tabs button').forEach(btn => {
   btn.onclick = () => {
@@ -236,11 +144,11 @@ document.querySelectorAll('#tabs button').forEach(btn => {
     document.querySelectorAll('section[data-panel]').forEach(s => {
       s.hidden = s.dataset.panel !== btn.dataset.tab;
     });
-    if (btn.dataset.tab === "focus") { renderSites(); renderDelay(); }
+    if (btn.dataset.tab === "focus") renderSites();
   };
 });
 
-// --- Focus: block any site (Pro) -------------------------------------------
+// --- Focus: block any site -------------------------------------------
 const $siteInput = document.getElementById('siteInput');
 const $siteStatus = document.getElementById('siteStatus');
 const $siteList = document.getElementById('siteList');
@@ -270,7 +178,6 @@ async function renderSites() {
 }
 
 document.getElementById('siteAdd').onclick = async () => {
-  if (!(await isPro())) { window.open(CONFIG.proUrl, '_blank'); return; }
   const domain = normalizeDomain($siteInput.value);
   if (!domain) { $siteStatus.textContent = 'Enter a domain like instagram.com'; return; }
   // Redirecting arbitrary sites needs host access; ask for it on this click (a user gesture).
@@ -285,59 +192,6 @@ document.getElementById('siteAdd').onclick = async () => {
   renderSites();
 };
 
-// --- Focus: delay curve (Pro) ----------------------------------------------
-const $dStart = document.getElementById('dStart');
-const $dTarget = document.getElementById('dTarget');
-const $dDays = document.getElementById('dDays');
-const $dPreview = document.getElementById('dPreview');
-
-async function currentDelay() {
-  const { delay } = await chrome.storage.local.get('delay');
-  return { ...CONFIG.delay, ...(delay || {}) };
-}
-
-function readInputs() {
-  return {
-    startSeconds: Math.max(0.5, Number($dStart.value) || 1),
-    targetSeconds: Math.max(1, Number($dTarget.value) || 5) * 60, // UI is minutes
-    targetDays: Math.max(1, Math.round(Number($dDays.value) || 100)),
-  };
-}
-
-function showPreview(d) {
-  const day = (n) => {
-    const s = delaySeconds(d, 0, n * 86400000);
-    return s >= 60 ? `${(s / 60).toFixed(1)}min` : `${s}s`;
-  };
-  const pct = ((Math.pow(d.targetSeconds / d.startSeconds, 1 / d.targetDays) - 1) * 100).toFixed(1);
-  $dPreview.textContent =
-    `day 1 ${day(1)} · day 30 ${day(30)} · day ${d.targetDays} ${day(d.targetDays)}  (+${pct}% a day)`;
-}
-
-async function renderDelay() {
-  const d = await currentDelay();
-  $dStart.value = d.startSeconds;
-  $dTarget.value = Math.round(d.targetSeconds / 60);
-  $dDays.value = d.targetDays;
-  showPreview(d);
-}
-
-for (const el of [$dStart, $dTarget, $dDays]) el.oninput = () => showPreview(readInputs());
-
-document.getElementById('dSave').onclick = async () => {
-  if (!(await isPro())) { window.open(CONFIG.proUrl, '_blank'); return; }
-  const d = readInputs();
-  await chrome.storage.local.set({ delay: d });
-  showPreview(d);
-  $dPreview.textContent += '  ✓ saved';
-};
-
-document.getElementById('dReset').onclick = async () => {
-  if (!(await isPro())) { window.open(CONFIG.proUrl, '_blank'); return; }
-  await chrome.storage.local.remove('delay');
-  renderDelay();
-};
-
 // --- Data: backup & restore (free — never lock users out of their own data) --
 const $dataStatus = document.getElementById('dataStatus');
 
@@ -346,7 +200,7 @@ document.getElementById('exportAll').onclick = async () => {
   const blob = new Blob([JSON.stringify(all)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `yt-redirector-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `pageturn-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
   $dataStatus.textContent = `Exported ${(all.books || []).length} book(s).`;
@@ -360,7 +214,7 @@ $importFile.onchange = async () => {
   try {
     const data = JSON.parse(await file.text());
     if (!data || typeof data !== 'object' || !Array.isArray(data.books)) {
-      throw new Error('not a yt-redirector backup');
+      throw new Error('not a Pageturn backup');
     }
     if (!confirm(`Restore ${data.books.length} book(s)? This replaces everything currently stored.`)) return;
     await chrome.storage.local.clear();

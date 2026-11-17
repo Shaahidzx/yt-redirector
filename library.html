@@ -2,23 +2,16 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>yt-redirector — library</title>
+  <title>Pageturn — library</title>
   <style>
     :root { color-scheme: light dark; }
     body { font: 15px/1.5 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; }
     h1 { font-size: 20px; }
-    .book { border: 1px solid #8883; border-radius: 8px; padding: 12px 14px; margin: 10px 0; }
-    .book.active { border-color: #c0392b; }
-    .book h3 { margin: 0 0 6px; font-size: 15px; }
-    .book small { opacity: .6; }
     button { font: inherit; padding: 5px 10px; border: 1px solid #8886; border-radius: 6px;
       background: none; color: inherit; cursor: pointer; margin-right: 6px; }
     #drop { border: 2px dashed #8886; border-radius: 10px; padding: 26px; text-align: center; opacity: .8; }
     #status { min-height: 1.4em; opacity: .8; }
-    #topbar { display: flex; justify-content: space-between; align-items: center; }
-    #getpro { padding: 6px 12px; border-radius: 6px; background: #c0392b; color: #fff;
-      text-decoration: none; font-size: 14px; }
-    /* Pro shelf: uniform cover grid */
+    /* Cover shelf: uniform grid */
     #shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
       gap: 20px 16px; margin-top: 14px; }
     .card { text-align: left; }
@@ -34,12 +27,6 @@
     .card small { opacity: .6; font-size: 11px; }
     .card .acts { margin-top: 6px; display: flex; gap: 4px; }
     .card .acts button { font-size: 11px; padding: 3px 7px; margin: 0; }
-    #pro { border-top: 1px solid #8883; margin-top: 28px; padding-top: 16px; }
-    #pro h2 { font-size: 15px; }
-    #pro input { font: inherit; padding: 6px 8px; width: 60%; }
-    #proStatus { margin-left: 6px; opacity: .85; }
-    #proStatus.ok { color: #2e9e5b; opacity: 1; }
-    #proStatus.err { color: #c0392b; opacity: 1; }
     /* Tabs keep every feature one click away instead of one long scroll. */
     #tabs { display: flex; gap: 4px; border-bottom: 1px solid #8883; margin: 18px 0 0; }
     #tabs button { border: none; border-radius: 6px 6px 0 0; margin: 0; padding: 8px 14px;
@@ -53,37 +40,28 @@
       border: 1px solid #8883; border-radius: 7px; }
     .site span { flex: 1; }
     .site button { margin: 0; padding: 3px 9px; font-size: 12px; }
-    .row label { display: flex; align-items: center; gap: 5px; font-size: 13px; opacity: .85; }
-    .row input[type=number] { font: inherit; width: 72px; padding: 5px 6px; }
-    section h2 { font-size: 15px; margin: 26px 0 4px; }
   </style>
 </head>
 <body>
-  <div id="topbar">
-    <h1>Your reading library</h1>
-    <a id="getpro" target="_blank" rel="noopener">★ Get Pro</a>
-  </div>
+  <h1>Your reading library</h1>
   <nav id="tabs">
     <button data-tab="library" class="on">Library</button>
     <button data-tab="focus">Focus</button>
     <button data-tab="data">Data</button>
-    <button data-tab="pro">Pro</button>
   </nav>
 
   <section data-panel="library">
-    <p class="hint">The active book is what you read while a blocked site is delayed.</p>
+    <p class="hint">The active book is what you read before a blocked site opens.</p>
     <div id="drop">
       Drop a <b>.pdf</b>, <b>.epub</b>, or <b>.txt</b> here, or
       <input type="file" id="file" accept=".pdf,.epub,.txt,text/plain,application/pdf,application/epub+zip">
     </div>
     <p id="status"></p>
-    <div id="shelf" hidden></div>
-    <div id="list"></div>
+    <div id="shelf"></div>
   </section>
 
   <section data-panel="focus" hidden>
-    <p class="hint">YouTube is always delayed. <b>Pro</b> lets you add any other site —
-      they all redirect to your book instead. ★</p>
+    <p class="hint">YouTube always sends you to your book first. Add any other site to do the same.</p>
     <div class="row">
       <input id="siteInput" type="text" placeholder="instagram.com">
       <button id="siteAdd">Add site</button>
@@ -91,17 +69,6 @@
     <p id="siteStatus" class="hint"></p>
     <div id="siteList"></div>
 
-    <h2>Delay curve ★</h2>
-    <p class="hint">The wait grows a little every day — the same small percentage each time, so
-      you never notice a jump. <b>Pro</b> can tune it.</p>
-    <div class="row">
-      <label>Start <input id="dStart" type="number" min="0.5" step="0.5"> s</label>
-      <label>Reach <input id="dTarget" type="number" min="1" step="1"> min</label>
-      <label>Over <input id="dDays" type="number" min="1" step="1"> days</label>
-      <button id="dSave">Save</button>
-      <button id="dReset">Reset</button>
-    </div>
-    <p id="dPreview" class="hint"></p>
   </section>
 
   <section data-panel="data" hidden>
@@ -115,17 +82,6 @@
     <p id="dataStatus" class="hint"></p>
   </section>
 
-  <section data-panel="pro" hidden>
-    <p class="hint">Unlimited books, block any site, extra themes &amp; fonts, search, notes,
-      highlight export, and the cover shelf.
-      <a id="getpro2" target="_blank" rel="noopener">Get Pro →</a></p>
-    <div class="row">
-      <input id="license" type="text" placeholder="Paste your license key">
-      <button id="activate">Activate</button>
-      <button id="deactivate" hidden>Remove</button>
-      <span id="proStatus"></span>
-    </div>
-  </section>
   <script type="module" src="library.js"></script>
 </body>
 </html>

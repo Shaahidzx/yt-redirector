@@ -1,13 +1,8 @@
 import { CONFIG } from './config.js';
 import { buildRedirectRules } from './logic.js';
 
-// Record install date once (drives the growing delay) and clear any stale bypass rules.
-chrome.runtime.onInstalled.addListener(async () => {
-  const { installDate } = await chrome.storage.local.get('installDate');
-  if (!installDate) await chrome.storage.local.set({ installDate: Date.now() });
-  clearAllPasses();
-  syncBlockRules();
-});
+// Clear any stale bypass rules and install the redirect rules.
+chrome.runtime.onInstalled.addListener(() => { clearAllPasses(); syncBlockRules(); });
 chrome.runtime.onStartup.addListener(() => { clearAllPasses(); syncBlockRules(); });
 
 // Keep the redirect rules in step with the user's blocked-site list.
@@ -15,7 +10,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.blocked) syncBlockRules();
 });
 
-// YouTube is always blocked; Pro users add their own sites on top.
+// YouTube is always blocked; users add their own sites on top.
 async function syncBlockRules() {
   const { blocked = [] } = await chrome.storage.local.get('blocked');
   const domains = ['youtube.com', ...blocked.filter(d => d !== 'youtube.com')];
@@ -28,7 +23,7 @@ async function syncBlockRules() {
 }
 
 // Toolbar button: open the reader on demand (no YouTube gate) so you can read
-// and keep your streak without a YouTube urge.
+// without a YouTube urge.
 chrome.action.onClicked.addListener(() => {
   chrome.tabs.create({ url: chrome.runtime.getURL('reader.html?ondemand=1') });
 });
@@ -41,7 +36,7 @@ async function clearAllPasses() {
   }
 }
 
-// The reader page asks for a pass once its countdown finishes. We open a short,
+// The reader page asks for a pass when you click Continue. We open a short,
 // tab-scoped hole in the redirect so YouTube can load, then close it again.
 // This is the ONLY bypass — there is no user-facing "skip".
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
